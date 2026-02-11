@@ -22,6 +22,7 @@ from openviking.session.compressor import SessionCompressor
 from openviking.session.user_id import UserIdentifier
 from openviking.storage import VikingDBManager
 from openviking.storage.collection_schemas import init_context_collection
+from openviking.storage.transaction import TransactionManager, init_transaction_manager
 from openviking.storage.viking_fs import VikingFS, init_viking_fs
 from openviking.utils import get_logger
 from openviking.utils.config import OpenVikingConfig, get_openviking_config
@@ -79,6 +80,7 @@ class OpenVikingService:
         self._resource_processor: Optional[ResourceProcessor] = None
         self._skill_processor: Optional[SkillProcessor] = None
         self._session_compressor: Optional[SessionCompressor] = None
+        self._transaction_manager: Optional[TransactionManager] = None
 
         # Sub-services
         self._fs_service = FSService()
@@ -115,6 +117,13 @@ class OpenVikingService:
             vectordb_config=config.vectordb, agfs_config=config.agfs
         )
 
+        # Initialize TransactionManager
+        self._transaction_manager = init_transaction_manager(
+            agfs_config=config.agfs,
+            timeout=config.agfs.timeout if hasattr(config.agfs, "timeout") else 3600,
+            max_parallel_locks=8,
+        )
+
     @property
     def viking_fs(self) -> Optional[VikingFS]:
         """Get VikingFS instance."""
@@ -124,6 +133,11 @@ class OpenVikingService:
     def vikingdb_manager(self) -> Optional[VikingDBManager]:
         """Get VikingDBManager instance."""
         return self._vikingdb_manager
+
+    @property
+    def transaction_manager(self) -> Optional[TransactionManager]:
+        """Get TransactionManager instance."""
+        return self._transaction_manager
 
     @property
     def session_compressor(self) -> Optional[SessionCompressor]:
@@ -207,6 +221,11 @@ class OpenVikingService:
         self._skill_processor = SkillProcessor(vikingdb=self._vikingdb_manager)
         self._session_compressor = SessionCompressor(vikingdb=self._vikingdb_manager)
 
+        # Start TransactionManager if initialized
+        if self._transaction_manager:
+            self._transaction_manager.start()
+            logger.info("TransactionManager started")
+
         # Wire up sub-services
         self._fs_service.set_viking_fs(self._viking_fs)
         self._relation_service.set_viking_fs(self._viking_fs)
@@ -235,6 +254,10 @@ class OpenVikingService:
 
     async def close(self) -> None:
         """Close OpenViking and release resources."""
+        if self._transaction_manager:
+            self._transaction_manager.stop()
+            self._transaction_manager = None
+
         if self._agfs_manager:
             self._agfs_manager.stop()
             self._agfs_manager = None

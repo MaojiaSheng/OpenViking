@@ -12,13 +12,16 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-from openviking.storage.transaction.filesystem import FileSystemBase
+from pyagfs import AGFSClient
+
+from openviking.storage.transaction.filesystem import AGFSFileSystem, FileSystemBase
 from openviking.storage.transaction.path_lock import PathLock
 from openviking.storage.transaction.transaction_record import (
     TransactionRecord,
     TransactionStatus,
 )
 from openviking.storage.transaction.transaction_store import TransactionStore
+from openviking.utils.config.agfs_config import AGFSConfig
 from openviking.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,7 +33,8 @@ _instance: Optional["TransactionManager"] = None
 
 
 def init_transaction_manager(
-    fs: FileSystemBase,
+    fs: Optional[FileSystemBase] = None,
+    agfs_config: Optional[AGFSConfig] = None,
     timeout: int = DEFAULT_TRANSACTION_TIMEOUT,
     max_parallel_locks: int = DEFAULT_MAX_PARALLEL_LOCKS,
     lock_impl: Optional[PathLock] = None,
@@ -43,6 +47,12 @@ def init_transaction_manager(
         max_parallel_locks: Maximum number of parallel lock operations
         lock_impl: Optional custom lock implementation (default: PathLock)
     """
+    if not fs:
+        if agfs_config:
+            agfs_client = AGFSClient(agfs_config.url)
+            fs = AGFSFileSystem(agfs_client)
+        else:
+            raise ValueError("AGFSConfig or FileSystemBase is required")
     global _instance
     _instance = TransactionManager(
         fs=fs,
