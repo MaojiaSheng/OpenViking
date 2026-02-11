@@ -25,7 +25,7 @@ from openviking.storage.collection_schemas import init_context_collection
 from openviking.storage.transaction import TransactionManager, init_transaction_manager
 from openviking.storage.viking_fs import VikingFS, init_viking_fs
 from openviking.utils import get_logger
-from openviking.utils.config import OpenVikingConfig, get_openviking_config
+from openviking.utils.config import get_openviking_config
 from openviking.utils.config.open_viking_config import initialize_openviking_config
 from openviking.utils.config.storage_config import StorageConfig
 from openviking.utils.resource_processor import ResourceProcessor
@@ -109,11 +109,7 @@ class OpenVikingService:
         )
 
         # Initialize TransactionManager
-        self._transaction_manager = init_transaction_manager(
-            agfs_config=config.agfs,
-            timeout=config.agfs.timeout if hasattr(config.agfs, "timeout") else 3600,
-            max_parallel_locks=8,
-        )
+        self._transaction_manager = init_transaction_manager(agfs_config=config.agfs)
 
     @property
     def viking_fs(self) -> Optional[VikingFS]:
@@ -217,7 +213,7 @@ class OpenVikingService:
 
         # Start TransactionManager if initialized
         if self._transaction_manager:
-            self._transaction_manager.start()
+            await self._transaction_manager.start()
             logger.info("TransactionManager started")
 
         # Wire up sub-services

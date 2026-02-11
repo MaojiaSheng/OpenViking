@@ -19,7 +19,7 @@ python -m openviking serve
 python -m openviking serve --config /path/to/ov.conf
 
 # 覆盖 host/port
-python -m openviking serve --port 8000
+python -m openviking serve --port 1933
 ```
 
 你应该看到：

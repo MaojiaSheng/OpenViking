@@ -1,340 +1,200 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """
-PathLock: Path-based lock implementation using lock files.
+Path lock implementation for transaction management.
 
-Implements directory-level locking through .path.ovlock files.
+Provides path-based locking mechanism to prevent concurrent directory operations.
+Lock protocol: viking://resources/.../.path.ovlock file exists = locked
 """
 
 import asyncio
-import os
-from pathlib import PurePath
 from typing import List, Optional
 
-from openviking.storage.transaction.filesystem import FileSystemBase
+from pyagfs import AGFSClient
+
+from openviking.storage.transaction.transaction_record import TransactionRecord
 from openviking.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Lock file name
 LOCK_FILE_NAME = ".path.ovlock"
-DEFAULT_MAX_PARALLEL_LOCKS = 8
 
 
 class PathLock:
-    """Path-based lock implementation using lock files.
+    """Path lock manager for transaction-based directory locking.
 
-    Lock protocol:
-    - Lock file exists at {path}/.path.ovlock
-    - Lock file content contains the transaction ID
-    - Lock file existence indicates the path is locked
+    Implements path-based locking using lock files (.path.ovlock) to prevent
+    concurrent operations on the same directory tree.
     """
 
-    def __init__(self, fs: FileSystemBase, max_parallel: int = DEFAULT_MAX_PARALLEL_LOCKS):
-        """Initialize PathLock.
+    def __init__(self, agfs_client: AGFSClient):
+        """Initialize path lock manager.
 
         Args:
-            fs: FileSystemBase instance for file operations
-            max_parallel: Maximum number of parallel lock operations
+            agfs_client: AGFS client for file system operations
         """
-        self.fs = fs
-        self.max_parallel = max_parallel
+        self._agfs = agfs_client
 
-    async def acquire(self, path: str, transaction_id: str) -> bool:
-        """Acquire lock for a single path (normal operation).
+    def _get_lock_path(self, path: str) -> str:
+        """Get lock file path for a directory.
 
-        Lock acquisition flow:
+        Args:
+            path: Directory path to lock
+
+        Returns:
+            Lock file path (path/.path.ovlock)
+        """
+        # Remove trailing slash if present
+        path = path.rstrip("/")
+        return f"{path}/{LOCK_FILE_NAME}"
+
+    def _get_parent_path(self, path: str) -> Optional[str]:
+        """Get parent directory path.
+
+        Args:
+            path: Directory path
+
+        Returns:
+            Parent directory path or None if at root
+        """
+        path = path.rstrip("/")
+        if "/" not in path:
+            return None
+        parent = path.rsplit("/", 1)[0]
+        return parent if parent else None
+
+    async def _is_locked_by_other(self, lock_path: str, transaction_id: str) -> bool:
+        """Check if path is locked by another transaction.
+
+        Args:
+            lock_path: Lock file path
+            transaction_id: Current transaction ID
+
+        Returns:
+            True if locked by another transaction, False otherwise
+        """
+        try:
+            content = self._agfs.cat(lock_path)
+            if isinstance(content, bytes):
+                lock_owner = content.decode("utf-8").strip()
+            else:
+                lock_owner = str(content).strip()
+            return lock_owner != transaction_id
+        except Exception:
+            # Lock file doesn't exist or can't be read - not locked
+            return False
+
+    async def _create_lock_file(self, lock_path: str, transaction_id: str) -> None:
+        """Create lock file with transaction ID.
+
+        Args:
+            lock_path: Lock file path
+            transaction_id: Transaction ID to write to lock file
+        """
+        self._agfs.write(lock_path, transaction_id.encode("utf-8"))
+
+    async def _verify_lock_ownership(self, lock_path: str, transaction_id: str) -> bool:
+        """Verify lock file is owned by current transaction.
+
+        Args:
+            lock_path: Lock file path
+            transaction_id: Current transaction ID
+
+        Returns:
+            True if lock is owned by current transaction, False otherwise
+        """
+        try:
+            content = self._agfs.cat(lock_path)
+            if isinstance(content, bytes):
+                lock_owner = content.decode("utf-8").strip()
+            else:
+                lock_owner = str(content).strip()
+            return lock_owner == transaction_id
+        except Exception:
+            return False
+
+    async def _remove_lock_file(self, lock_path: str) -> None:
+        """Remove lock file.
+
+        Args:
+            lock_path: Lock file path
+        """
+        try:
+            self._agfs.rm(lock_path)
+        except Exception:
+            # Lock file might not exist, ignore
+            pass
+
+    async def acquire_normal(self, path: str, transaction: TransactionRecord) -> bool:
+        """Acquire path lock for normal operations.
+
+        Lock acquisition flow for normal operations:
         1. Check if target directory exists
         2. Check if target directory is locked by another transaction
         3. Check if parent directory is locked by another transaction
         4. Create .path.ovlock file with transaction ID
-        5. Double-check parent directory is not locked
-        6. Verify lock file contains current transaction ID
+        5. Check again if parent directory is locked by another transaction
+        6. Read lock file to confirm it contains current transaction ID
         7. Return success if all checks pass
 
         Args:
-            path: Target path to lock
-            transaction_id: Transaction ID that owns the lock
+            path: Directory path to lock
+            transaction: Transaction record
 
         Returns:
             True if lock acquired successfully, False otherwise
         """
+        transaction_id = transaction.id
+        lock_path = self._get_lock_path(path)
+        parent_path = self._get_parent_path(path)
+
+        # Step 1: Check if target directory exists
         try:
-            await asyncio.to_thread(self._check_dir_exists, path)
-
-            if await self.is_locked(path):
-                owner = await self.get_lock_owner(path)
-                if owner != transaction_id:
-                    logger.warning(f"[PathLock] Path {path} already locked by {owner}")
-                    return False
-
-            parent_path = str(PurePath(path).parent)
-            if parent_path and parent_path != path:
-                if await self.is_locked(parent_path):
-                    owner = await self.get_lock_owner(parent_path)
-                    if owner != transaction_id:
-                        logger.warning(f"[PathLock] Parent {parent_path} already locked by {owner}")
-                        return False
-
-            lock_file_path = os.path.join(path, LOCK_FILE_NAME)
-            await asyncio.to_thread(self.fs.write, lock_file_path, transaction_id.encode("utf-8"))
-
-            if parent_path and parent_path != path:
-                if await self.is_locked(parent_path):
-                    owner = await self.get_lock_owner(parent_path)
-                    if owner != transaction_id:
-                        await self._remove_lock_file(lock_file_path)
-                        logger.warning(
-                            f"[PathLock] Parent {parent_path} locked during acquisition by {owner}"
-                        )
-                        return False
-
-            content = await asyncio.to_thread(self.fs.read, lock_file_path)
-            if isinstance(content, bytes):
-                content = content.decode("utf-8")
-            if content != transaction_id:
-                await self._remove_lock_file(lock_file_path)
-                logger.warning(
-                    f"[PathLock] Lock file corrupted for {path}, expected {transaction_id}, got {content}"
-                )
-                return False
-
-            logger.debug(f"[PathLock] Acquired lock for {path} by {transaction_id}")
-            return True
-
-        except Exception as e:
-            logger.error(f"[PathLock] Failed to acquire lock for {path}: {e}")
-            return False
-
-    async def acquire_multiple(self, paths: List[str], transaction_id: str) -> bool:
-        """Acquire locks for multiple paths in parallel.
-
-        Args:
-            paths: List of target paths to lock
-            transaction_id: Transaction ID that owns the locks
-
-        Returns:
-            True if all locks acquired successfully, False otherwise
-        """
-        acquired_locks = []
-
-        try:
-            for path in paths:
-                if await self.acquire(path, transaction_id):
-                    acquired_locks.append(path)
-                else:
-                    logger.warning(f"[PathLock] Failed to acquire lock for {path}, rolling back")
-                    await self.release(acquired_locks)
-                    return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"[PathLock] Error in acquire_multiple: {e}")
-            await self.release(acquired_locks)
-            return False
-
-    async def acquire_recursive(
-        self, path: str, transaction_id: str, parallel: bool = True
-    ) -> bool:
-        """Acquire locks recursively for a directory tree (for rm operations).
-
-        Args:
-            path: Root directory path
-            transaction_id: Transaction ID that owns the locks
-            parallel: Whether to use parallel lock acquisition
-
-        Returns:
-            True if all locks acquired successfully, False otherwise
-        """
-        try:
-            if not parallel:
-                return await self._acquire_recursive_serial(path, transaction_id)
-            else:
-                return await self._acquire_recursive_parallel(path, transaction_id)
-
-        except Exception as e:
-            logger.error(f"[PathLock] Failed to acquire recursive lock for {path}: {e}")
-            return False
-
-    async def _acquire_recursive_serial(self, path: str, transaction_id: str) -> bool:
-        """Acquire locks recursively in serial mode.
-
-        Args:
-            path: Root directory path
-            transaction_id: Transaction ID that owns the locks
-
-        Returns:
-            True if all locks acquired successfully, False otherwise
-        """
-        acquired_locks = []
-
-        try:
-            subdirs = await self._collect_subdirectories(path)
-            subdirs.append(path)
-
-            for subdir in subdirs:
-                if await self.acquire(subdir, transaction_id):
-                    acquired_locks.append(subdir)
-                else:
-                    logger.warning(f"[PathLock] Failed to acquire lock for {subdir}, rolling back")
-                    await self.release(acquired_locks)
-                    return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"[PathLock] Error in serial recursive acquire: {e}")
-            await self.release(acquired_locks)
-            return False
-
-    async def _acquire_recursive_parallel(self, path: str, transaction_id: str) -> bool:
-        """Acquire locks recursively in parallel mode (bottom-up).
-
-        Parallel lock acquisition flow:
-        1. Traverse directory tree to collect all subdirectories
-        2. Sort subdirectories by depth (deepest first)
-        3. Batch create .path.ovlock files with limited parallelism
-        4. Finally lock the root directory
-        5. If any lock fails, release all acquired locks in reverse order
-
-        Args:
-            path: Root directory path
-            transaction_id: Transaction ID that owns the locks
-
-        Returns:
-            True if all locks acquired successfully, False otherwise
-        """
-        acquired_locks = []
-
-        try:
-            subdirs = await self._collect_subdirectories(path)
-            subdirs_by_depth = self._sort_by_depth(subdirs)
-
-            for batch in self._batch_paths(subdirs_by_depth, self.max_parallel):
-                tasks = [self.acquire(p, transaction_id) for p in batch]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                for subdir_path, result in zip(batch, results):
-                    if isinstance(result, Exception) or not result:
-                        logger.warning(
-                            f"[PathLock] Failed to acquire lock for {subdir_path}, rolling back"
-                        )
-                        await self.release(acquired_locks)
-                        return False
-                    acquired_locks.append(subdir_path)
-
-            if await self.acquire(path, transaction_id):
-                acquired_locks.append(path)
-            else:
-                logger.warning(f"[PathLock] Failed to acquire lock for root {path}, rolling back")
-                await self.release(acquired_locks)
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"[PathLock] Error in parallel recursive acquire: {e}")
-            await self.release(acquired_locks)
-            return False
-
-    async def acquire_for_move(self, src_path: str, dst_path: str, transaction_id: str) -> bool:
-        """Acquire locks for move operation (source and destination).
-
-        Args:
-            src_path: Source directory path
-            dst_path: Destination directory path
-            transaction_id: Transaction ID that owns the locks
-
-        Returns:
-            True if all locks acquired successfully, False otherwise
-        """
-        acquired_locks = []
-
-        try:
-            if await self.acquire_recursive(src_path, transaction_id):
-                acquired_locks.extend(await self._collect_subdirectories(src_path))
-                acquired_locks.append(src_path)
-            else:
-                logger.warning(f"[PathLock] Failed to acquire lock for source {src_path}")
-                return False
-
-            if await self.acquire(dst_path, transaction_id):
-                acquired_locks.append(dst_path)
-            else:
-                logger.warning(
-                    f"[PathLock] Failed to acquire lock for destination {dst_path}, rolling back"
-                )
-                await self.release(acquired_locks)
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"[PathLock] Error in acquire_for_move: {e}")
-            await self.release(acquired_locks)
-            return False
-
-    async def release(self, locks: List[str]) -> None:
-        """Release locks for specified paths.
-
-        Args:
-            locks: List of paths to release locks for
-        """
-        for path in locks:
-            try:
-                lock_file_path = os.path.join(path, LOCK_FILE_NAME)
-                await self._remove_lock_file(lock_file_path)
-                logger.debug(f"[PathLock] Released lock for {path}")
-            except Exception as e:
-                logger.error(f"[PathLock] Failed to release lock for {path}: {e}")
-
-    async def is_locked(self, path: str) -> bool:
-        """Check if a path is locked.
-
-        Args:
-            path: Path to check
-
-        Returns:
-            True if path is locked, False otherwise
-        """
-        try:
-            lock_file_path = os.path.join(path, LOCK_FILE_NAME)
-            await asyncio.to_thread(self.fs.stat, lock_file_path)
-            return True
+            self._agfs.stat(path)
         except Exception:
+            logger.warning(f"Directory does not exist: {path}")
             return False
 
-    async def get_lock_owner(self, path: str) -> Optional[str]:
-        """Get the lock owner (transaction ID) for a path.
+        # Step 2: Check if target directory is locked by another transaction
+        if await self._is_locked_by_other(lock_path, transaction_id):
+            logger.warning(f"Path already locked by another transaction: {path}")
+            return False
 
-        Args:
-            path: Path to check
+        # Step 3: Check if parent directory is locked by another transaction
+        if parent_path:
+            parent_lock_path = self._get_lock_path(parent_path)
+            if await self._is_locked_by_other(parent_lock_path, transaction_id):
+                logger.warning(f"Parent path locked by another transaction: {parent_path}")
+                return False
 
-        Returns:
-            Transaction ID if path is locked, None otherwise
-        """
+        # Step 4: Create lock file
         try:
-            lock_file_path = os.path.join(path, LOCK_FILE_NAME)
-            content = await asyncio.to_thread(self.fs.read, lock_file_path)
-            if isinstance(content, bytes):
-                content = content.decode("utf-8")
-            return content
-        except Exception:
-            return None
+            await self._create_lock_file(lock_path, transaction_id)
+        except Exception as e:
+            logger.error(f"Failed to create lock file: {e}")
+            return False
 
-    def _check_dir_exists(self, path: str) -> None:
-        """Check if directory exists (synchronous)."""
-        self.fs.stat(path)
+        # Step 5: Check again if parent directory is locked
+        if parent_path:
+            parent_lock_path = self._get_lock_path(parent_path)
+            if await self._is_locked_by_other(parent_lock_path, transaction_id):
+                logger.warning(f"Parent path locked after lock creation: {parent_path}")
+                await self._remove_lock_file(lock_path)
+                return False
 
-    async def _remove_lock_file(self, lock_file_path: str) -> None:
-        """Remove lock file (synchronous AGFS call)."""
-        try:
-            await asyncio.to_thread(self.fs.rm, lock_file_path, recursive=False)
-        except Exception:
-            pass
+        # Step 6: Verify lock ownership
+        if not await self._verify_lock_ownership(lock_path, transaction_id):
+            logger.error(f"Lock ownership verification failed: {path}")
+            return False
+
+        # Step 7: Success - add lock to transaction
+        transaction.add_lock(lock_path)
+        logger.debug(f"Lock acquired: {lock_path}")
+        return True
 
     async def _collect_subdirectories(self, path: str) -> List[str]:
-        """Collect all subdirectories under a path.
+        """Collect all subdirectory paths recursively.
 
         Args:
             path: Root directory path
@@ -343,43 +203,129 @@ class PathLock:
             List of all subdirectory paths
         """
         subdirs = []
-
-        async def _walk(current_path: str):
-            try:
-                entries = await asyncio.to_thread(self.fs.ls, current_path)
+        try:
+            entries = self._agfs.ls(path)
+            if isinstance(entries, list):
                 for entry in entries:
-                    name = entry.get("name", "")
-                    if name in [".", ".."]:
-                        continue
-                    if entry.get("isDir"):
-                        full_path = os.path.join(current_path, name)
-                        subdirs.append(full_path)
-                        await _walk(full_path)
-            except Exception as e:
-                logger.error(f"[PathLock] Error walking {current_path}: {e}")
+                    if isinstance(entry, dict) and entry.get("isDir"):
+                        entry_path = entry.get("name", "")
+                        if entry_path:
+                            subdirs.append(entry_path)
+                            # Recursively collect subdirectories
+                            subdirs.extend(await self._collect_subdirectories(entry_path))
+        except Exception as e:
+            logger.warning(f"Failed to list directory {path}: {e}")
 
-        await _walk(path)
         return subdirs
 
-    def _sort_by_depth(self, paths: List[str]) -> List[str]:
-        """Sort paths by depth (deepest first).
+    async def acquire_rm(
+        self, path: str, transaction: TransactionRecord, max_parallel: int = 8
+    ) -> bool:
+        """Acquire path lock for rm operation using bottom-up parallel locking.
+
+        Lock acquisition flow for rm operations (parallel bottom-up mode):
+        1. Collect all subdirectory paths recursively
+        2. Sort by depth (deepest first)
+        3. Create lock files in batches with limited parallelism
+        4. Lock the target directory last
+        5. If any lock fails, release all acquired locks in reverse order
 
         Args:
-            paths: List of paths to sort
+            path: Directory path to lock
+            transaction: Transaction record
+            max_parallel: Maximum number of parallel lock operations
 
         Returns:
-            Sorted paths with deepest first
+            True if all locks acquired successfully, False otherwise
         """
-        return sorted(paths, key=lambda p: -p.count(os.sep))
+        transaction_id = transaction.id
+        lock_path = self._get_lock_path(path)
+        acquired_locks = []
 
-    def _batch_paths(self, paths: List[str], batch_size: int) -> List[List[str]]:
-        """Split paths into batches.
+        # Step 1: Collect all subdirectories
+        subdirs = await self._collect_subdirectories(path)
+
+        # Step 2: Sort by depth (deepest first)
+        subdirs.sort(key=lambda p: p.count("/"), reverse=True)
+
+        # Step 3: Create lock files in batches
+        try:
+            # Lock subdirectories in batches
+            for i in range(0, len(subdirs), max_parallel):
+                batch = subdirs[i : i + max_parallel]
+                tasks = []
+                for subdir in batch:
+                    subdir_lock_path = self._get_lock_path(subdir)
+                    tasks.append(self._create_lock_file(subdir_lock_path, transaction_id))
+
+                # Execute batch in parallel
+                await asyncio.gather(*tasks)
+                acquired_locks.extend([self._get_lock_path(s) for s in batch])
+
+            # Step 4: Lock target directory
+            await self._create_lock_file(lock_path, transaction_id)
+            acquired_locks.append(lock_path)
+
+            # Add all locks to transaction
+            for lock in acquired_locks:
+                transaction.add_lock(lock)
+
+            logger.debug(f"RM locks acquired for {len(acquired_locks)} paths")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to acquire RM locks: {e}")
+            # Step 5: Release all acquired locks in reverse order
+            for lock in reversed(acquired_locks):
+                await self._remove_lock_file(lock)
+            return False
+
+    async def acquire_mv(
+        self,
+        src_path: str,
+        dst_path: str,
+        transaction: TransactionRecord,
+        max_parallel: int = 8,
+    ) -> bool:
+        """Acquire path lock for mv operation.
+
+        Lock acquisition flow for mv operations:
+        1. Lock source directory (using RM-style locking)
+        2. Lock destination directory (using normal locking)
 
         Args:
-            paths: List of paths
-            batch_size: Maximum batch size
+            src_path: Source directory path
+            dst_path: Destination directory path
+            transaction: Transaction record
+            max_parallel: Maximum number of parallel lock operations
 
         Returns:
-            List of path batches
+            True if all locks acquired successfully, False otherwise
         """
-        return [paths[i : i + batch_size] for i in range(0, len(paths), batch_size)]
+        # Step 1: Lock source directory
+        if not await self.acquire_rm(src_path, transaction, max_parallel):
+            logger.warning(f"Failed to lock source path: {src_path}")
+            return False
+
+        # Step 2: Lock destination directory
+        if not await self.acquire_normal(dst_path, transaction):
+            logger.warning(f"Failed to lock destination path: {dst_path}")
+            # Release source locks
+            await self.release(transaction)
+            return False
+
+        logger.debug(f"MV locks acquired: {src_path} -> {dst_path}")
+        return True
+
+    async def release(self, transaction: TransactionRecord) -> None:
+        """Release all locks held by the transaction.
+
+        Args:
+            transaction: Transaction record
+        """
+        # Release locks in reverse order (LIFO)
+        for lock_path in reversed(transaction.locks):
+            await self._remove_lock_file(lock_path)
+            transaction.remove_lock(lock_path)
+
+        logger.debug(f"Released {len(transaction.locks)} locks for transaction {transaction.id}")

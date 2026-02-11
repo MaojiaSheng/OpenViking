@@ -1,444 +1,382 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """
-TransactionManager: Global singleton for transaction lifecycle management.
+Transaction manager for OpenViking.
 
-Manages transaction lifecycle, lock acquisition, and timeout prevention.
+Global singleton that manages transaction lifecycle and lock mechanisms.
 """
 
 import asyncio
-import atexit
 import threading
 import time
 from typing import Any, Dict, Optional
 
 from pyagfs import AGFSClient
 
-from openviking.storage.transaction.filesystem import AGFSFileSystem, FileSystemBase
 from openviking.storage.transaction.path_lock import PathLock
 from openviking.storage.transaction.transaction_record import (
     TransactionRecord,
     TransactionStatus,
 )
-from openviking.storage.transaction.transaction_store import TransactionStore
-from openviking.utils.config.agfs_config import AGFSConfig
 from openviking.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_TRANSACTION_TIMEOUT = 3600
-DEFAULT_MAX_PARALLEL_LOCKS = 8
-
-_instance: Optional["TransactionManager"] = None
-
-
-def init_transaction_manager(
-    fs: Optional[FileSystemBase] = None,
-    agfs_config: Optional[AGFSConfig] = None,
-    timeout: int = DEFAULT_TRANSACTION_TIMEOUT,
-    max_parallel_locks: int = DEFAULT_MAX_PARALLEL_LOCKS,
-    lock_impl: Optional[PathLock] = None,
-) -> "TransactionManager":
-    """Initialize TransactionManager singleton.
-
-    Args:
-        fs: FileSystemBase instance for file operations
-        timeout: Transaction timeout in seconds
-        max_parallel_locks: Maximum number of parallel lock operations
-        lock_impl: Optional custom lock implementation (default: PathLock)
-    """
-    if not fs:
-        if agfs_config:
-            agfs_client = AGFSClient(agfs_config.url)
-            fs = AGFSFileSystem(agfs_client)
-        else:
-            raise ValueError("AGFSConfig or FileSystemBase is required")
-    global _instance
-    _instance = TransactionManager(
-        fs=fs,
-        timeout=timeout,
-        max_parallel_locks=max_parallel_locks,
-        lock_impl=lock_impl,
-    )
-    return _instance
-
-
-def get_transaction_manager() -> "TransactionManager":
-    """Get TransactionManager singleton."""
-    if _instance is None:
-        raise RuntimeError(
-            "TransactionManager not initialized. Call init_transaction_manager() first."
-        )
-    return _instance
+# Global singleton instance
+_transaction_manager: Optional["TransactionManager"] = None
+_lock = threading.Lock()
 
 
 class TransactionManager:
-    """Transaction manager for managing transaction lifecycle and lock mechanism.
+    """Transaction manager for OpenViking.
 
-    Responsibilities:
-    - Allocate transaction IDs
-    - Manage transaction lifecycle (begin, commit, rollback)
-    - Provide lock mechanism interface
-    - Prevent deadlocks through timeout mechanism
+    Global singleton that manages transaction lifecycle and lock mechanisms.
+    Responsible for:
+    - Allocating transaction IDs
+    - Managing transaction lifecycle (start, commit, rollback)
+    - Providing transaction lock mechanism interface, preventing deadlocks
     """
 
     def __init__(
         self,
-        fs: FileSystemBase,
-        timeout: int = DEFAULT_TRANSACTION_TIMEOUT,
-        max_parallel_locks: int = DEFAULT_MAX_PARALLEL_LOCKS,
-        lock_impl: Optional[PathLock] = None,
+        agfs_client: AGFSClient,
+        timeout: int = 3600,
+        max_parallel_locks: int = 8,
     ):
-        """Initialize TransactionManager.
+        """Initialize transaction manager.
 
         Args:
-            fs: FileSystemBase instance for file operations
-            timeout: Transaction timeout in seconds
-            max_parallel_locks: Maximum number of parallel lock operations
-            lock_impl: Optional custom lock implementation (default: PathLock)
+            agfs_client: AGFS client for file system operations
+            timeout: Transaction timeout in seconds (default: 3600)
+            max_parallel_locks: Maximum number of parallel lock operations (default: 8)
         """
-        self._fs = fs
-        self.timeout = timeout
-        self.max_parallel_locks = max_parallel_locks
-        self._lock: Optional[PathLock] = lock_impl
-        self._store = TransactionStore(fs)
-        self._started = False
-        self._timeout_check_interval = 10
-        self._timeout_check_thread: Optional[threading.Thread] = None
-        self._timeout_check_stop_event: Optional[threading.Event] = None
+        self._agfs = agfs_client
+        self._timeout = timeout
+        self._max_parallel_locks = max_parallel_locks
+        self._path_lock = PathLock(agfs_client)
 
-        atexit.register(self.stop)
+        # Active transactions: {transaction_id: TransactionRecord}
+        self._transactions: Dict[str, TransactionRecord] = {}
+
+        # Background task for timeout cleanup
+        self._cleanup_task: Optional[asyncio.Task] = None
+        self._running = False
+
         logger.info(
-            f"[TransactionManager] Initialized with timeout={timeout}s, max_parallel_locks={max_parallel_locks}"
+            f"TransactionManager initialized (timeout={timeout}s, max_parallel_locks={max_parallel_locks})"
         )
 
-    def start(self) -> None:
-        """Start TransactionManager, initialize lock mechanism and timeout checker."""
-        if self._started:
+    async def start(self) -> None:
+        """Start transaction manager.
+
+        Starts the background cleanup task for timed-out transactions.
+        """
+        if self._running:
+            logger.debug("TransactionManager already running")
             return
 
-        if self._lock is None:
-            self._lock = PathLock(self._fs, max_parallel=self.max_parallel_locks)
-        self._started = True
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._store.initialize())
-        loop.close()
-
-        self._timeout_check_stop_event = threading.Event()
-        self._timeout_check_thread = threading.Thread(
-            target=self._timeout_check_loop,
-            args=(self._timeout_check_stop_event,),
-            daemon=True,
-        )
-        self._timeout_check_thread.start()
-
-        logger.info("[TransactionManager] Started")
-
-    def _timeout_check_loop(self, stop_event: threading.Event) -> None:
-        """Background thread loop to check for timed-out transactions."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            while not stop_event.is_set():
-                try:
-                    loop.run_until_complete(self._check_timeouts())
-                except Exception as e:
-                    logger.error(f"[TransactionManager] Timeout check error: {e}")
-                stop_event.wait(self._timeout_check_interval)
-        finally:
-            loop.close()
-
-    async def _check_timeouts(self) -> None:
-        """Check and clean up timed-out transactions."""
-        current_time = time.time()
-        timed_out_transactions = []
-
-        transactions = await self._store.list_all()
-        for transaction_id, record in list(transactions.items()):
-            if (
-                record.status in [TransactionStatus.ACQUIRE, TransactionStatus.EXEC]
-                and (current_time - record.created_at) > self.timeout
-            ):
-                timed_out_transactions.append(transaction_id)
-
-        for transaction_id in timed_out_transactions:
-            logger.warning(
-                f"[TransactionManager] Transaction {transaction_id} timed out, rolling back"
-            )
-            await self.rollback(transaction_id)
+        self._running = True
+        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+        logger.info("TransactionManager started")
 
     def stop(self) -> None:
-        """Stop TransactionManager and release resources."""
-        if not self._started:
+        """Stop transaction manager.
+
+        Stops the background cleanup task and releases all resources.
+        """
+        if not self._running:
+            logger.debug("TransactionManager already stopped")
             return
 
-        if self._timeout_check_stop_event:
-            self._timeout_check_stop_event.set()
-        if self._timeout_check_thread:
-            self._timeout_check_thread.join()
-        self._timeout_check_stop_event = None
-        self._timeout_check_thread = None
+        self._running = False
 
-        self._lock = None
-        self._started = False
-        logger.info("[TransactionManager] Stopped")
+        # Cancel cleanup task
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            self._cleanup_task = None
 
-    def is_running(self) -> bool:
-        """Check if TransactionManager is running."""
-        return self._started
+        # Release all active transactions
+        for tx_id in list(self._transactions.keys()):
+            self._transactions.pop(tx_id, None)
 
-    async def begin_transaction(self, init_info: Optional[Dict[str, Any]] = None) -> str:
-        """Begin a new transaction.
+        logger.info("TransactionManager stopped")
+
+    async def _cleanup_loop(self) -> None:
+        """Background loop for cleaning up timed-out transactions."""
+        while self._running:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+                await self._cleanup_timed_out()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in cleanup loop: {e}")
+
+    async def _cleanup_timed_out(self) -> None:
+        """Clean up timed-out transactions."""
+        current_time = time.time()
+        timed_out = []
+
+        for tx_id, tx in self._transactions.items():
+            if current_time - tx.updated_at > self._timeout:
+                timed_out.append(tx_id)
+
+        for tx_id in timed_out:
+            logger.warning(f"Transaction timed out: {tx_id}")
+            await self.rollback(tx_id)
+
+    def create_transaction(self, init_info: Optional[Dict[str, Any]] = None) -> TransactionRecord:
+        """Create a new transaction.
 
         Args:
             init_info: Transaction initialization information
 
         Returns:
-            Transaction ID
+            New transaction record
         """
-        if not self._started:
-            self.start()
+        tx = TransactionRecord(init_info=init_info or {})
+        self._transactions[tx.id] = tx
+        logger.debug(f"Transaction created: {tx.id}")
+        return tx
 
-        record = TransactionRecord(init_info=init_info or {})
-        await self._store.add(record)
-        logger.debug(f"[TransactionManager] Began transaction {record.id}")
-        return record.id
+    def get_transaction(self, transaction_id: str) -> Optional[TransactionRecord]:
+        """Get transaction by ID.
+
+        Args:
+            transaction_id: Transaction ID
+
+        Returns:
+            Transaction record or None if not found
+        """
+        return self._transactions.get(transaction_id)
+
+    async def begin(self, transaction_id: str) -> bool:
+        """Begin a transaction.
+
+        Args:
+            transaction_id: Transaction ID
+
+        Returns:
+            True if transaction started successfully, False otherwise
+        """
+        tx = self.get_transaction(transaction_id)
+        if not tx:
+            logger.error(f"Transaction not found: {transaction_id}")
+            return False
+
+        tx.update_status(TransactionStatus.AQUIRE)
+        logger.debug(f"Transaction begun: {transaction_id}")
+        return True
 
     async def commit(self, transaction_id: str) -> bool:
         """Commit a transaction.
 
         Args:
-            transaction_id: Transaction ID to commit
+            transaction_id: Transaction ID
 
         Returns:
-            True if committed successfully, False otherwise
+            True if transaction committed successfully, False otherwise
         """
-        record = await self._store.get(transaction_id)
-        if record is None:
-            logger.warning(f"[TransactionManager] Transaction {transaction_id} not found")
+        tx = self.get_transaction(transaction_id)
+        if not tx:
+            logger.error(f"Transaction not found: {transaction_id}")
             return False
 
-        if record.status == TransactionStatus.RELEASED:
-            logger.warning(f"[TransactionManager] Transaction {transaction_id} already released")
-            return False
+        # Update status to COMMIT
+        tx.update_status(TransactionStatus.COMMIT)
 
-        record.update_status(TransactionStatus.COMMIT)
-        await self._store.update(record)
+        # Release all locks
+        tx.update_status(TransactionStatus.RELEASING)
+        await self._path_lock.release(tx)
 
-        await self._release_locks(record)
+        # Update status to RELEASED
+        tx.update_status(TransactionStatus.RELEASED)
 
-        record.update_status(TransactionStatus.RELEASED)
-        await self._store.update(record)
-        await self._store.delete(transaction_id)
+        # Remove from active transactions
+        self._transactions.pop(transaction_id, None)
 
-        logger.debug(f"[TransactionManager] Committed transaction {transaction_id}")
+        logger.debug(f"Transaction committed: {transaction_id}")
         return True
 
     async def rollback(self, transaction_id: str) -> bool:
         """Rollback a transaction.
 
         Args:
-            transaction_id: Transaction ID to rollback
+            transaction_id: Transaction ID
 
         Returns:
-            True if rolled back successfully, False otherwise
+            True if transaction rolled back successfully, False otherwise
         """
-        record = await self._store.get(transaction_id)
-        if record is None:
-            logger.warning(f"[TransactionManager] Transaction {transaction_id} not found")
+        tx = self.get_transaction(transaction_id)
+        if not tx:
+            logger.error(f"Transaction not found: {transaction_id}")
             return False
 
-        if record.status == TransactionStatus.RELEASED:
-            logger.warning(f"[TransactionManager] Transaction {transaction_id} already released")
-            return False
+        # Update status to FAIL
+        tx.update_status(TransactionStatus.FAIL)
 
-        record.update_status(TransactionStatus.FAIL)
-        await self._store.update(record)
+        # Release all locks
+        tx.update_status(TransactionStatus.RELEASING)
+        await self._path_lock.release(tx)
 
-        await self._release_locks(record)
+        # Update status to RELEASED
+        tx.update_status(TransactionStatus.RELEASED)
 
-        record.update_status(TransactionStatus.RELEASED)
-        await self._store.update(record)
-        await self._store.delete(transaction_id)
+        # Remove from active transactions
+        self._transactions.pop(transaction_id, None)
 
-        logger.debug(f"[TransactionManager] Rolled back transaction {transaction_id}")
+        logger.debug(f"Transaction rolled back: {transaction_id}")
         return True
 
-    async def _release_locks(self, record: TransactionRecord) -> None:
-        """Release all locks for a transaction.
-
-        Args:
-            record: Transaction record
-        """
-        if not record.locks:
-            return
-
-        record.update_status(TransactionStatus.RELEASING)
-        await self._store.update(record)
-
-        if self._lock:
-            await self._lock.release(record.locks)
-
-        record.locks.clear()
-
-    async def acquire_lock(self, transaction_id: str, path: str) -> bool:
-        """Acquire a lock for a transaction.
+    async def acquire_lock_normal(self, transaction_id: str, path: str) -> bool:
+        """Acquire path lock for normal (non-rm/mv) operations.
 
         Args:
             transaction_id: Transaction ID
-            path: Path to lock
+            path: Directory path to lock
 
         Returns:
             True if lock acquired successfully, False otherwise
         """
-        record = await self._store.get(transaction_id)
-        if record is None:
-            logger.warning(f"[TransactionManager] Transaction {transaction_id} not found")
+        tx = self.get_transaction(transaction_id)
+        if not tx:
+            logger.error(f"Transaction not found: {transaction_id}")
             return False
 
-        if not self._lock:
-            logger.error("[TransactionManager] Lock mechanism not initialized")
-            return False
+        tx.update_status(TransactionStatus.AQUIRE)
+        success = await self._path_lock.acquire_normal(path, tx)
 
-        record.update_status(TransactionStatus.ACQUIRE)
-        await self._store.update(record)
+        if success:
+            tx.update_status(TransactionStatus.EXEC)
+        else:
+            tx.update_status(TransactionStatus.FAIL)
 
-        if await self._lock.acquire(path, transaction_id):
-            record.add_lock(path)
-            await self._store.update(record)
-            return True
+        return success
 
-        return False
-
-    async def acquire_locks_recursive(
-        self, transaction_id: str, path: str, parallel: bool = True
+    async def acquire_lock_rm(
+        self, transaction_id: str, path: str, max_parallel: Optional[int] = None
     ) -> bool:
-        """Acquire locks recursively for a transaction (for rm operations).
+        """Acquire path lock for rm operation.
 
         Args:
             transaction_id: Transaction ID
-            path: Root directory path
-            parallel: Whether to use parallel lock acquisition
+            path: Directory path to lock
+            max_parallel: Maximum number of parallel lock operations (default: from config)
 
         Returns:
-            True if all locks acquired successfully, False otherwise
+            True if lock acquired successfully, False otherwise
         """
-        record = await self._store.get(transaction_id)
-        if record is None:
-            logger.warning(f"[TransactionManager] Transaction {transaction_id} not found")
+        tx = self.get_transaction(transaction_id)
+        if not tx:
+            logger.error(f"Transaction not found: {transaction_id}")
             return False
 
-        if not self._lock:
-            logger.error("[TransactionManager] Lock mechanism not initialized")
-            return False
+        tx.update_status(TransactionStatus.AQUIRE)
+        parallel = max_parallel or self._max_parallel_locks
+        success = await self._path_lock.acquire_rm(path, tx, parallel)
 
-        record.update_status(TransactionStatus.ACQUIRE)
-        await self._store.update(record)
+        if success:
+            tx.update_status(TransactionStatus.EXEC)
+        else:
+            tx.update_status(TransactionStatus.FAIL)
 
-        if await self._lock.acquire_recursive(path, transaction_id, parallel):
-            subdirs = await self._lock._collect_subdirectories(path)
-            for subdir in subdirs:
-                record.add_lock(subdir)
-            record.add_lock(path)
-            await self._store.update(record)
-            return True
+        return success
 
-        return False
-
-    async def acquire_locks_for_move(
-        self, transaction_id: str, src_path: str, dst_path: str
+    async def acquire_lock_mv(
+        self,
+        transaction_id: str,
+        src_path: str,
+        dst_path: str,
+        max_parallel: Optional[int] = None,
     ) -> bool:
-        """Acquire locks for a move operation.
+        """Acquire path lock for mv operation.
 
         Args:
             transaction_id: Transaction ID
             src_path: Source directory path
             dst_path: Destination directory path
+            max_parallel: Maximum number of parallel lock operations (default: from config)
 
         Returns:
-            True if all locks acquired successfully, False otherwise
+            True if lock acquired successfully, False otherwise
         """
-        record = await self._store.get(transaction_id)
-        if record is None:
-            logger.warning(f"[TransactionManager] Transaction {transaction_id} not found")
+        tx = self.get_transaction(transaction_id)
+        if not tx:
+            logger.error(f"Transaction not found: {transaction_id}")
             return False
 
-        if not self._lock:
-            logger.error("[TransactionManager] Lock mechanism not initialized")
-            return False
+        tx.update_status(TransactionStatus.AQUIRE)
+        parallel = max_parallel or self._max_parallel_locks
+        success = await self._path_lock.acquire_mv(src_path, dst_path, tx, parallel)
 
-        record.update_status(TransactionStatus.ACQUIRE)
-        await self._store.update(record)
+        if success:
+            tx.update_status(TransactionStatus.EXEC)
+        else:
+            tx.update_status(TransactionStatus.FAIL)
 
-        if await self._lock.acquire_for_move(src_path, dst_path, transaction_id):
-            src_subdirs = await self._lock._collect_subdirectories(src_path)
-            for subdir in src_subdirs:
-                record.add_lock(subdir)
-            record.add_lock(src_path)
-            record.add_lock(dst_path)
-            await self._store.update(record)
-            return True
+        return success
 
-        return False
-
-    async def get_transaction(self, transaction_id: str) -> Optional[TransactionRecord]:
-        """Get transaction record by ID.
-
-        Args:
-            transaction_id: Transaction ID
+    def get_active_transactions(self) -> Dict[str, TransactionRecord]:
+        """Get all active transactions.
 
         Returns:
-            TransactionRecord if found, None otherwise
+            Dictionary of active transactions {transaction_id: TransactionRecord}
         """
-        return await self._store.get(transaction_id)
+        return self._transactions.copy()
 
-    async def list_transactions(self) -> Dict[str, TransactionRecord]:
-        """List all active transactions.
+    def get_transaction_count(self) -> int:
+        """Get the number of active transactions.
 
         Returns:
-            Dictionary of transaction_id -> TransactionRecord
+            Number of active transactions
         """
-        return await self._store.list_all()
+        return len(self._transactions)
 
-    async def execute_in_transaction(
-        self,
-        operation_func,
-        *args,
-        init_info: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> Any:
-        """Execute an operation within a transaction.
 
-        Args:
-            operation_func: Function to execute
-            *args: Positional arguments for operation_func
-            init_info: Transaction initialization information
-            **kwargs: Keyword arguments for operation_func
+def init_transaction_manager(
+    agfs_config: Any,
+    tx_timeout: int = 3600,
+    max_parallel_locks: int = 8,
+) -> TransactionManager:
+    """Initialize transaction manager singleton.
 
-        Returns:
-            Result of operation_func if successful, None otherwise
+    Args:
+        agfs_config: AGFS configuration (url, timeout, etc.)
+        tx_timeout: Transaction timeout in seconds (default: 3600)
+        max_parallel_locks: Maximum number of parallel lock operations (default: 8)
 
-        Raises:
-            Exception: If operation_func raises an exception
-        """
-        transaction_id = await self.begin_transaction(init_info=init_info)
+    Returns:
+        TransactionManager instance
+    """
+    global _transaction_manager
 
-        try:
-            record = await self._store.get(transaction_id)
-            if record:
-                record.update_status(TransactionStatus.EXEC)
-                await self._store.update(record)
+    with _lock:
+        if _transaction_manager is not None:
+            logger.debug("TransactionManager already initialized")
+            return _transaction_manager
 
-            result = await operation_func(*args, **kwargs)
+        # Get AGFS URL from config
+        agfs_url = getattr(agfs_config, "url", "http://localhost:8080")
+        agfs_timeout = getattr(agfs_config, "timeout", 10)
 
-            await self.commit(transaction_id)
-            return result
+        # Create AGFS client
+        agfs_client = AGFSClient(api_base_url=agfs_url, timeout=agfs_timeout)
 
-        except Exception as e:
-            logger.error(
-                f"[TransactionManager] Operation failed in transaction {transaction_id}: {e}"
-            )
-            await self.rollback(transaction_id)
-            raise
+        # Create transaction manager
+        _transaction_manager = TransactionManager(
+            agfs_client=agfs_client,
+            timeout=tx_timeout,
+            max_parallel_locks=max_parallel_locks,
+        )
+
+        logger.info("TransactionManager initialized as singleton")
+        return _transaction_manager
+
+
+def get_transaction_manager() -> Optional[TransactionManager]:
+    """Get transaction manager singleton.
+
+    Returns:
+        TransactionManager instance or None if not initialized
+    """
+    return _transaction_manager
