@@ -65,6 +65,8 @@ Before starting with OpenViking, please ensure your environment meets the follow
 
 ### 1. Installation
 
+#### Python Package
+
 ```bash
 pip install openviking
 ```
