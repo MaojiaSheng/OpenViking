@@ -263,6 +263,7 @@ class AsyncHTTPClient(BaseClient):
             for file_path in dir_path.rglob("*"):
                 if file_path.is_file():
                     arcname = file_path.relative_to(dir_path)
+                    arcname = str(arcname).replace("\\", "/")
                     zipf.write(file_path, arcname=arcname)
 
         return str(zip_path)
