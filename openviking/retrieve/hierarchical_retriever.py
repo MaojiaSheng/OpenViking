@@ -8,6 +8,7 @@ and rerank-based relevance scoring.
 """
 
 import heapq
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -145,20 +146,21 @@ class HierarchicalRetriever:
         )
 
         # Debug: Print all URIs in global_results
-        logger.debug(f"[retrieve] target_dirs: {target_dirs}")
-        logger.debug(f"[retrieve] root_uris: {root_uris}")
-        logger.debug(f"[retrieve] scope_dsl: {scope_dsl}")
-        logger.debug(
-            f"[retrieve] Step 2 completed, global_results contains {len(global_results)} items:"
-        )
-        for i, r in enumerate(global_results):
-            uri = r.get("uri", "UNKNOWN_URI")
-            score = r.get("_score", 0.0)
-            level = r.get("level", "UNKNOWN_LEVEL")
-            account_id = r.get("account_id", "UNKNOWN_ACCOUNT_ID")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"[retrieve] target_dirs: {target_dirs}")
+            logger.debug(f"[retrieve] root_uris: {root_uris}")
+            logger.debug(f"[retrieve] scope_dsl: {scope_dsl}")
             logger.debug(
-                f"  [{i}] URI: {uri}, score: {score:.4f}, level: {level}, account_id: {account_id}"
+                f"[retrieve] Step 2 completed, global_results contains {len(global_results)} items:"
             )
+            for i, r in enumerate(global_results):
+                uri = r.get("uri", "UNKNOWN_URI")
+                score = r.get("_score", 0.0)
+                level = r.get("level", "UNKNOWN_LEVEL")
+                account_id = r.get("account_id", "UNKNOWN_ACCOUNT_ID")
+                logger.debug(
+                    f"  [{i}] URI: {uri}, score: {score:.4f}, level: {level}, account_id: {account_id}"
+                )
 
         # Step 3: Merge starting points
         starting_points = self._merge_starting_points(
