@@ -5,18 +5,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from openviking.server.identity import RequestContext, Role
 from openviking.session.memory_deduplicator import MemoryDeduplicator
 from openviking.session.memory_extractor import CandidateMemory, MemoryCategory
-from openviking_cli.session.user_id import UserIdentifier
+from tests.utils.mock_context import make_test_ctx, make_test_user
 
-
-def _make_user() -> UserIdentifier:
-    return UserIdentifier("acc1", "test_user", "test_agent")
-
-
-user = _make_user()
-ctx = RequestContext(user=user, role=Role.ROOT)
+ctx = make_test_ctx()
 
 
 class _DummyEmbedResult:
@@ -36,13 +29,13 @@ def _make_candidate(category: MemoryCategory = MemoryCategory.PREFERENCES) -> Ca
         overview="User asks for concise answers frequently.",
         content="The user prefers concise summaries over long explanations.",
         source_session="session_test",
-        user=_make_user(),
+        user=make_test_user(),
         language="en",
     )
 
 
 def _make_existing_user_memory(uri_suffix: str = "existing.md") -> dict:
-    user_space = _make_user().user_space_name()
+    user_space = make_test_user().user_space_name()
     return {
         "id": f"uri_{uri_suffix}",
         "uri": f"viking://user/{user_space}/memories/preferences/{uri_suffix}",
@@ -57,7 +50,7 @@ def _make_existing_user_memory(uri_suffix: str = "existing.md") -> dict:
 
 
 def _make_existing_agent_memory(uri_suffix: str = "case1.md") -> dict:
-    user = _make_user()
+    user = make_test_user()
     agent_space = user.agent_space_name()
     return {
         "id": f"uri_{uri_suffix}",
@@ -93,7 +86,7 @@ class TestFindSimilarMemoriesURIConversion:
         )
 
         assert len(similar) == 1
-        user_space = _make_user().user_space_name()
+        user_space = make_test_user().user_space_name()
         original_uri = f"viking://user/{user_space}/memories/preferences/pref1.md"
         expected_uri = f"{user_temp_uri}/memories/preferences/pref1.md"
         assert similar[0].uri == expected_uri
@@ -118,7 +111,7 @@ class TestFindSimilarMemoriesURIConversion:
         )
 
         assert len(similar) == 1
-        user = _make_user()
+        user = make_test_user()
         agent_space = user.agent_space_name()
         original_uri = f"viking://agent/{agent_space}/memories/cases/case1.md"
         expected_uri = f"{agent_temp_uri}/memories/cases/case1.md"
@@ -143,12 +136,12 @@ class TestFindSimilarMemoriesURIConversion:
         )
 
         assert len(similar) == 1
-        user_space = _make_user().user_space_name()
+        user_space = make_test_user().user_space_name()
         expected_uri = f"viking://user/{user_space}/memories/preferences/pref1.md"
         assert similar[0].uri == expected_uri
 
     async def test_mixed_uris_only_convert_matching_type(self):
-        agent_space = _make_user().agent_space_name()
+        agent_space = make_test_user().agent_space_name()
 
         vikingdb = MagicMock()
         vikingdb.get_embedder.return_value = _DummyEmbedder()

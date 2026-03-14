@@ -5,17 +5,10 @@
 
 from openviking import AsyncOpenViking
 from openviking.message import TextPart
-from openviking.server.identity import RequestContext, Role
 from openviking.session import Session
-from openviking_cli.session.user_id import UserIdentifier
+from tests.utils.mock_context import make_test_ctx
 
-
-def _make_user() -> UserIdentifier:
-    return UserIdentifier("acc1", "test_user", "test_agent")
-
-
-user = _make_user()
-ctx = RequestContext(user=user, role=Role.ROOT)
+ctx = make_test_ctx()
 
 
 class TestCommit:
