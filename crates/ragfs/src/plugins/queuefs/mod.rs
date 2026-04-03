@@ -18,9 +18,17 @@ use crate::core::{
 };
 use async_trait::async_trait;
 use backend::{MemoryBackend, Message, QueueBackend};
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::Mutex;
+
+/// Dequeue response format (matches Go libagfsbinding format)
+#[derive(Debug, Serialize)]
+struct QueueMessage {
+    id: String,
+    data: String,
+}
 
 /// Parsed path information
 struct ParsedPath {
@@ -148,13 +156,25 @@ impl FileSystem for QueueFileSystem {
                 let msg = backend
                     .dequeue(&queue_name)?
                     .ok_or_else(|| Error::NotFound("queue is empty".to_string()))?;
-                Ok(msg.data)
+                // Return in Go libagfsbinding format: {"id": "...", "data": "..."}
+                let data_str = String::from_utf8_lossy(&msg.data).to_string();
+                let response = QueueMessage {
+                    id: msg.id,
+                    data: data_str,
+                };
+                Ok(serde_json::to_vec(&response)?)
             }
             "peek" => {
                 let msg = backend
                     .peek(&queue_name)?
                     .ok_or_else(|| Error::NotFound("queue is empty".to_string()))?;
-                Ok(msg.data.clone())
+                // Return in Go libagfsbinding format: {"id": "...", "data": "..."}
+                let data_str = String::from_utf8_lossy(&msg.data).to_string();
+                let response = QueueMessage {
+                    id: msg.id.clone(),
+                    data: data_str,
+                };
+                Ok(serde_json::to_vec(&response)?)
             }
             "size" => {
                 let size = backend.size(&queue_name)?;
