@@ -1440,6 +1440,20 @@ async fn handle_grep(
     level_limit: i32,
     ctx: CliContext,
 ) -> Result<()> {
+    // Prevent grep from root directory to avoid excessive server load and timeouts
+    if uri == "viking://" || uri == "viking:///" {
+        eprintln!(
+            "Error: Cannot grep from root directory 'viking://'.\n\
+             Grep from root would search across all scopes (resources, user, agent, session, queue, temp),\n\
+             which may cause server timeout or excessive load.\n\
+             Please specify a more specific scope, e.g.:\n\
+               ov grep --uri=viking://resources '{}'\n\
+               ov grep --uri=viking://user '{}'",
+            pattern, pattern
+        );
+        std::process::exit(1);
+    }
+
     let mut params = vec![format!("--uri={}", uri), format!("-n {}", node_limit), format!("-L {}", level_limit)];
     if let Some(excluded) = &exclude_uri {
         params.push(format!("-x {}", excluded));
