@@ -421,6 +421,9 @@ enum Commands {
             default_value = "256"
         )]
         node_limit: i32,
+        /// Maximum depth level to traverse (default: 10)
+        #[arg(short = 'L', long = "level-limit", default_value = "10")]
+        level_limit: i32,
     },
     /// Run file glob pattern search
     Glob {
@@ -808,7 +811,8 @@ async fn main() {
             pattern,
             ignore_case,
             node_limit,
-        } => handle_grep(uri, exclude_uri, pattern, ignore_case, node_limit, ctx).await,
+            level_limit,
+        } => handle_grep(uri, exclude_uri, pattern, ignore_case, node_limit, level_limit, ctx).await,
 
         Commands::Glob {
             pattern,
@@ -1433,9 +1437,10 @@ async fn handle_grep(
     pattern: String,
     ignore_case: bool,
     node_limit: i32,
+    level_limit: i32,
     ctx: CliContext,
 ) -> Result<()> {
-    let mut params = vec![format!("--uri={}", uri), format!("-n {}", node_limit)];
+    let mut params = vec![format!("--uri={}", uri), format!("-n {}", node_limit), format!("-L {}", level_limit)];
     if let Some(excluded) = &exclude_uri {
         params.push(format!("-x {}", excluded));
     }
@@ -1452,6 +1457,7 @@ async fn handle_grep(
         &pattern,
         ignore_case,
         node_limit,
+        level_limit,
         ctx.output_format,
         ctx.compact,
     )

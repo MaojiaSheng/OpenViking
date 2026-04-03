@@ -518,6 +518,7 @@ impl HttpClient {
         pattern: &str,
         ignore_case: bool,
         node_limit: i32,
+        level_limit: i32,
     ) -> Result<serde_json::Value> {
         let body = serde_json::json!({
             "uri": uri,
@@ -525,6 +526,7 @@ impl HttpClient {
             "pattern": pattern,
             "case_insensitive": ignore_case,
             "node_limit": node_limit,
+            "level_limit": level_limit,
         });
         self.post("/api/v1/search/grep", &body).await
     }
