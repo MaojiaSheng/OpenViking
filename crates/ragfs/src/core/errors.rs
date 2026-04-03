@@ -5,6 +5,7 @@
 //! and clear error messages.
 
 use std::io;
+use serde_json;
 
 /// Result type alias for RAGFS operations
 pub type Result<T> = std::result::Result<T, Error>;
@@ -79,6 +80,12 @@ pub enum Error {
     /// Internal error
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Serialization(err.to_string())
+    }
 }
 
 impl Error {
