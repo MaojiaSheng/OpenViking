@@ -57,6 +57,15 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Cache Go modules
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('third_party/agfs/**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
       - name: Cache C++ extensions
         uses: actions/cache@v5
         with:
