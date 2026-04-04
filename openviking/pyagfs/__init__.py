@@ -40,16 +40,19 @@ def _find_ragfs_so():
 
     Returns the path to the ``.so`` / ``.dylib`` / ``.pyd`` file, or *None*.
     """
-    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
-    # Exact match first: ragfs_python.cpython-312-darwin.so
-    exact = _LIB_DIR / f"ragfs_python{ext_suffix}"
-    if exact.exists():
-        return str(exact)
-    # Glob fallback: ragfs_python.cpython-*.so / ragfs_python.*.pyd
-    for pattern in ("ragfs_python.cpython-*", "ragfs_python.*"):
-        matches = glob.glob(str(_LIB_DIR / pattern))
-        if matches:
-            return matches[0]
+    try:
+        ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
+        # Exact match first: ragfs_python.cpython-312-darwin.so
+        exact = _LIB_DIR / f"ragfs_python{ext_suffix}"
+        if exact.exists():
+            return str(exact)
+        # Glob fallback: ragfs_python.cpython-*.so / ragfs_python.*.pyd
+        for pattern in ("ragfs_python.cpython-*", "ragfs_python.*"):
+            matches = glob.glob(str(_LIB_DIR / pattern))
+            if matches:
+                return matches[0]
+    except Exception:
+        pass
     return None
 
 
@@ -59,25 +62,31 @@ def _load_rust_binding():
     Searches openviking/lib/ for the pre-built native extension first,
     then falls back to a pip-installed ``ragfs_python`` package.
     """
-    so_path = _find_ragfs_so()
-    if so_path:
-        spec = importlib.util.spec_from_file_location("ragfs_python", so_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod.RAGFSBindingClient, None
+    try:
+        so_path = _find_ragfs_so()
+        if so_path:
+            spec = importlib.util.spec_from_file_location("ragfs_python", so_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod.RAGFSBindingClient, None
 
-    # Fallback: maybe ragfs_python was pip-installed (dev environment)
-    from ragfs_python import RAGFSBindingClient as _Rust
+        # Fallback: maybe ragfs_python was pip-installed (dev environment)
+        from ragfs_python import RAGFSBindingClient as _Rust
 
-    return _Rust, None
+        return _Rust, None
+    except Exception:
+        raise ImportError("Rust binding not available")
 
 
 def _load_go_binding():
     """Attempt to load the Go (ctypes) binding client."""
-    from .binding_client import AGFSBindingClient as _Go
-    from .binding_client import FileHandle as _GoFH
+    try:
+        from .binding_client import AGFSBindingClient as _Go
+        from .binding_client import FileHandle as _GoFH
 
-    return _Go, _GoFH
+        return _Go, _GoFH
+    except Exception:
+        raise ImportError("Go binding not available")
 
 
 def _resolve_binding(impl: str):
@@ -112,14 +121,14 @@ def _resolve_binding(impl: str):
             client, fh = _load_rust_binding()
             _logger.info("RAGFS_IMPL=auto: loaded Rust binding (ragfs-python)")
             return client, fh
-        except ImportError:
+        except Exception:
             pass
 
         try:
             client, fh = _load_go_binding()
             _logger.info("RAGFS_IMPL=auto: Rust unavailable, loaded Go binding (libagfsbinding)")
             return client, fh
-        except (ImportError, OSError):
+        except Exception:
             pass
 
         _logger.warning(
@@ -143,7 +152,16 @@ def get_binding_client(config_impl: str = "auto"):
 
 
 # Module-level defaults (used when importing ``from openviking.pyagfs import AGFSBindingClient``)
-AGFSBindingClient, BindingFileHandle = _resolve_binding(_RAGFS_IMPL_ENV or "auto")
+# Ensure module import never fails, even if bindings are unavailable
+try:
+    AGFSBindingClient, BindingFileHandle = _resolve_binding(_RAGFS_IMPL_ENV or "auto")
+except Exception:
+    _logger.warning(
+        "Failed to initialize AGFSBindingClient during module import; "
+        "AGFSBindingClient will be None. Use get_binding_client() for explicit handling."
+    )
+    AGFSBindingClient = None
+    BindingFileHandle = None
 
 __all__ = [
     "AGFSClient",
