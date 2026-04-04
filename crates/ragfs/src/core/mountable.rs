@@ -155,34 +155,38 @@ impl MountableFS {
         let normalized_path = normalize_path(path);
         let mounts = self.mounts.read().await;
 
-        // Find the longest matching prefix
-        let mut best_match: Option<(&String, &MountInfo)> = None;
-
-        for (mount_path, mount_info) in mounts.iter() {
-            if normalized_path.starts_with(mount_path.as_str()) {
-                if let Some((best_path, _)) = best_match {
-                    if mount_path.len() > best_path.len() {
-                        best_match = Some((mount_path, mount_info));
-                    }
-                } else {
-                    best_match = Some((mount_path, mount_info));
-                }
-            }
+        // Find the longest matching prefix using radix trie
+        // Check for exact match first
+        if let Some(mount_info) = mounts.get(&normalized_path) {
+            return Ok((mount_info.clone(), "/".to_string()));
         }
 
-        match best_match {
-            Some((mount_path, mount_info)) => {
-                // Calculate relative path
-                let relative_path = if normalized_path.len() == mount_path.len() {
-                    "/".to_string()
+        // Iterate through ancestors to find longest prefix match
+        // Start with the longest possible prefix and work backwards
+        let mut current = normalized_path.as_str();
+        loop {
+            if let Some(mount_info) = mounts.get(current) {
+                let relative_path = if current == "/" {
+                    normalized_path.clone()
                 } else {
-                    normalized_path[mount_path.len()..].to_string()
+                    normalized_path[current.len()..].to_string()
                 };
-
-                Ok((mount_info.clone(), relative_path))
+                return Ok((mount_info.clone(), relative_path));
             }
-            None => Err(Error::MountPointNotFound(normalized_path)),
+
+            if current == "/" {
+                break;
+            }
+
+            // Find parent path by removing last component
+            match current.rfind('/') {
+                Some(0) => current = "/",
+                Some(pos) => current = &current[..pos],
+                None => break,
+            }
         }
+
+        Err(Error::MountPointNotFound(normalized_path))
     }
 }
 

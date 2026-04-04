@@ -400,9 +400,44 @@ impl FileSystem for MemFileSystem {
             }
         }
 
-        // Move entry
+        // Collect all child entries if renaming a directory
+        let old_prefix = if old_normalized == "/" {
+            "/".to_string()
+        } else {
+            format!("{}/", old_normalized)
+        };
+        let new_prefix = if new_normalized == "/" {
+            "/".to_string()
+        } else {
+            format!("{}/", new_normalized)
+        };
+
+        let mut to_move = Vec::new();
+        for (path, _) in entries.iter() {
+            if path == &old_normalized {
+                continue;
+            }
+            if path.starts_with(&old_prefix) {
+                // Check for conflicts with new path
+                let new_child_path = format!("{}{}", new_prefix, &path[old_prefix.len()..]);
+                if entries.contains_key(&new_child_path) {
+                    return Err(Error::already_exists(&new_child_path));
+                }
+                to_move.push(path.clone());
+            }
+        }
+
+        // Move the main entry
         entries.remove(&old_normalized);
         entries.insert(new_normalized, entry);
+
+        // Move all child entries
+        for old_child_path in to_move {
+            let new_child_path = format!("{}{}", new_prefix, &old_child_path[old_prefix.len()..]);
+            if let Some(child_entry) = entries.remove(&old_child_path) {
+                entries.insert(new_child_path, child_entry);
+            }
+        }
 
         Ok(())
     }

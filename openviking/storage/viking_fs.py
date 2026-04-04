@@ -625,7 +625,12 @@ class VikingFS:
 
         await search_recursive(uri, 0)
 
-        return {"matches": results, "match_count": len(results), "files_scanned": files_scanned}
+        return {
+            "matches": results,
+            "count": len(results),
+            "match_count": len(results),
+            "files_scanned": files_scanned,
+        }
 
     async def stat(self, uri: str, ctx: Optional[RequestContext] = None) -> Dict[str, Any]:
         """

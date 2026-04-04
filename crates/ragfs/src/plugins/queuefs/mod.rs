@@ -500,6 +500,14 @@ impl ServicePlugin for QueueFSPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    /// Helper struct to deserialize queue messages in tests
+    #[derive(Debug, Deserialize)]
+    struct TestQueueMessage {
+        id: String,
+        data: String,
+    }
 
     #[tokio::test]
     async fn test_queuefs_enqueue_dequeue() {
@@ -521,10 +529,12 @@ mod tests {
 
         // Dequeue messages
         let result1 = fs.read("/test/dequeue", 0, 0).await.unwrap();
-        assert_eq!(result1, data1);
+        let msg1: TestQueueMessage = serde_json::from_slice(&result1).unwrap();
+        assert_eq!(msg1.data.as_bytes(), data1);
 
         let result2 = fs.read("/test/dequeue", 0, 0).await.unwrap();
-        assert_eq!(result2, data2);
+        let msg2: TestQueueMessage = serde_json::from_slice(&result2).unwrap();
+        assert_eq!(msg2.data.as_bytes(), data2);
 
         // Queue should be empty
         let result = fs.read("/test/dequeue", 0, 0).await;
@@ -546,14 +556,17 @@ mod tests {
 
         // Peek should return the message without removing it
         let result1 = fs.read("/test/peek", 0, 0).await.unwrap();
-        assert_eq!(result1, data);
+        let msg1: TestQueueMessage = serde_json::from_slice(&result1).unwrap();
+        assert_eq!(msg1.data.as_bytes(), data);
 
         let result2 = fs.read("/test/peek", 0, 0).await.unwrap();
-        assert_eq!(result2, data);
+        let msg2: TestQueueMessage = serde_json::from_slice(&result2).unwrap();
+        assert_eq!(msg2.data.as_bytes(), data);
 
         // Dequeue should still work
         let result3 = fs.read("/test/dequeue", 0, 0).await.unwrap();
-        assert_eq!(result3, data);
+        let msg3: TestQueueMessage = serde_json::from_slice(&result3).unwrap();
+        assert_eq!(msg3.data.as_bytes(), data);
     }
 
     #[tokio::test]

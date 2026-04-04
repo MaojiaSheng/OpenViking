@@ -157,9 +157,11 @@ impl DatabaseBackend for SQLiteBackend {
             .prepare_cached("SELECT COUNT(*) FROM files WHERE path = ?1")
             .map_err(|e| Error::internal(format!("prepare error: {}", e)))?;
 
-        let count: i64 = stmt
-            .query_row(params![path], |row| row.get(0))
-            .unwrap_or(0);
+        let count: i64 = match stmt.query_row(params![path], |row| row.get(0)) {
+            Ok(count) => count,
+            Err(rusqlite::Error::QueryReturnedNoRows) => 0,
+            Err(e) => return Err(Error::internal(format!("query error: {}", e))),
+        };
 
         Ok(count > 0)
     }

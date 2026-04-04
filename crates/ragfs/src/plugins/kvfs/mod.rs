@@ -291,17 +291,61 @@ impl FileSystem for KVFileSystem {
         let new_key = Self::path_to_key(new_path);
         let mut store = self.store.write().await;
 
+        // Check old key exists
         let entry = store
             .get(&old_key)
             .ok_or_else(|| Error::not_found(old_path))?
             .clone();
 
+        // Check new key doesn't exist
         if store.contains_key(&new_key) {
             return Err(Error::already_exists(new_path));
         }
 
+        // Collect all child keys with old prefix
+        let old_prefix = if old_key == "/" {
+            "".to_string()
+        } else {
+            format!("{}/", old_key)
+        };
+        let new_prefix = if new_key == "/" {
+            "".to_string()
+        } else {
+            format!("{}/", new_key)
+        };
+
+        let mut to_move = Vec::new();
+        for key in store.keys() {
+            if key == &old_key {
+                continue;
+            }
+            if !old_prefix.is_empty() && key.starts_with(&old_prefix) {
+                // Check for conflicts with new path
+                let new_child_key = format!("{}{}", new_prefix, &key[old_prefix.len()..]);
+                if store.contains_key(&new_child_key) {
+                    // Convert back to path for error message
+                    let new_child_path = if new_child_key == "/" {
+                        "/".to_string()
+                    } else {
+                        format!("/{}", new_child_key)
+                    };
+                    return Err(Error::already_exists(&new_child_path));
+                }
+                to_move.push(key.clone());
+            }
+        }
+
+        // Move the main entry
         store.remove(&old_key);
         store.insert(new_key, entry);
+
+        // Move all child entries
+        for old_child_key in to_move {
+            let new_child_key = format!("{}{}", new_prefix, &old_child_key[old_prefix.len()..]);
+            if let Some(child_entry) = store.remove(&old_child_key) {
+                store.insert(new_child_key, child_entry);
+            }
+        }
 
         Ok(())
     }
