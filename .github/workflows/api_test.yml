@@ -66,14 +66,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Cache C++ extensions
-        uses: actions/cache@v5
-        with:
-          path: openviking/pyagfs
-          key: ${{ runner.os }}-cpp-${{ hashFiles('**/CMakeLists.txt', '**/*.cpp', '**/*.h') }}
-          restore-keys: |
-            ${{ runner.os }}-cpp-
-
       - name: Cache Python dependencies (Unix)
         if: runner.os != 'Windows'
         uses: actions/cache@v5
