@@ -4,6 +4,11 @@
 Parser registry for OpenViking.
 
 Provides automatic parser selection based on file type.
+
+Backward Compatibility Note:
+    This module has been refactored to support a plugin-based architecture.
+    The public API remains unchanged for backward compatibility.
+    New code may use the plugin system directly via ParserPluginManager.
 """
 
 import logging
@@ -30,6 +35,9 @@ from openviking.parse.parsers.text import TextParser
 from openviking.parse.parsers.word import WordParser
 from openviking.parse.parsers.zip_parser import ZipParser
 
+# Plugin system imports
+from openviking.parse.plugin_manager import ParserPluginManager
+
 if TYPE_CHECKING:
     from openviking.parse.custom import CustomParserProtocol
 
@@ -41,27 +49,90 @@ class ParserRegistry:
     Registry for document parsers, which is a singleton.
 
     Automatically selects appropriate parser based on file extension.
+
+    Backward Compatibility Note:
+        This class now delegates to the new PluginManager for most operations,
+        while maintaining full backward compatibility with existing code.
     """
 
-    def __init__(self, register_optional: bool = True):
+    def __init__(
+        self, register_optional: bool = True, plugin_manager: Optional[ParserPluginManager] = None
+    ):
         """
         Initialize registry with default parsers.
 
         Args:
             register_optional: Whether to register optional parsers
                               that require extra dependencies
-            parser_configs: Dictionary of parser configurations (from load_parser_configs_from_dict)
+            plugin_manager: Optional PluginManager instance to use.
+                          If None, a new one will be created.
         """
+        # Legacy storage (for backward compatibility with register_custom, etc.)
         self._parsers: Dict[str, BaseParser] = {}
         self._extension_map: Dict[str, str] = {}
 
+        # Plugin manager integration
+        self._plugin_manager = plugin_manager or ParserPluginManager()
+
+        # Register built-in parsers with the plugin system
+        self._register_builtins_with_plugin_system()
+
+        # Also register with legacy storage for full backward compatibility
+        self._register_builtins_legacy()
+
+        # Load external plugins
+        self._plugin_manager.load_all()
+
+    def _register_builtins_with_plugin_system(self) -> None:
+        """Register all built-in parsers with the plugin system."""
+        # Register core parsers
+        self._plugin_manager.register_builtin_provider("text", TextParser, [".txt", ".text"])
+        self._plugin_manager.register_builtin_provider(
+            "markdown", MarkdownParser, [".md", ".markdown", ".mdown", ".mkd"]
+        )
+        self._plugin_manager.register_builtin_provider("pdf", PDFParser, [".pdf"])
+        self._plugin_manager.register_builtin_provider("html", HTMLParser, [".html", ".htm"])
+
+        # Register markitdown-inspired parsers
+        self._plugin_manager.register_builtin_provider("word", WordParser, [".docx"])
+        self._plugin_manager.register_builtin_provider("legacy_doc", LegacyDocParser, [".doc"])
+        self._plugin_manager.register_builtin_provider(
+            "powerpoint", PowerPointParser, [".pptx", ".ppt"]
+        )
+        self._plugin_manager.register_builtin_provider("excel", ExcelParser, [".xlsx", ".xls"])
+        self._plugin_manager.register_builtin_provider("epub", EPubParser, [".epub"])
+        self._plugin_manager.register_builtin_provider(
+            "code",
+            CodeRepositoryParser,
+            [".zip"],  # Note: also handled by zip
+        )
+        self._plugin_manager.register_builtin_provider("zip", ZipParser, [".zip"])
+        self._plugin_manager.register_builtin_provider(
+            "directory",
+            DirectoryParser,
+            [],  # No extensions
+        )
+
+        # Media parsers
+        self._plugin_manager.register_builtin_provider(
+            "image", ImageParser, [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"]
+        )
+        self._plugin_manager.register_builtin_provider(
+            "audio", AudioParser, [".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a"]
+        )
+        self._plugin_manager.register_builtin_provider(
+            "video", VideoParser, [".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm"]
+        )
+
+    def _register_builtins_legacy(self) -> None:
+        """Register all built-in parsers with the legacy storage for backward compatibility."""
         # Register core parsers
         self.register("text", TextParser())
         self.register("markdown", MarkdownParser())
         self.register("pdf", PDFParser())
-        self.register("html", HTMLParser())  # HTMLParser doesn't accept config yet
+        self.register("html", HTMLParser())
 
-        # Register markitdown-inspired parsers (built-in)
+        # Register markitdown-inspired parsers
         self.register("word", WordParser())
         self.register("legacy_doc", LegacyDocParser())
         self.register("powerpoint", PowerPointParser())
@@ -76,14 +147,6 @@ class ParserRegistry:
         self.register("image", ImageParser())
         self.register("audio", AudioParser())
         self.register("video", VideoParser())
-
-        # Optional: Feishu/Lark document parser (requires lark-oapi)
-        try:
-            from openviking.parse.parsers.feishu import FeishuParser
-
-            self.register("feishu", FeishuParser())
-        except ImportError:
-            pass
 
     def register(self, name: str, parser: BaseParser) -> None:
         """
@@ -191,12 +254,23 @@ class ParserRegistry:
             del self._parsers[name]
 
     def get_parser(self, name: str) -> Optional[BaseParser]:
-        """Get parser by name."""
+        """
+        Get parser by name.
+
+        First tries the plugin system, then falls back to legacy storage.
+        """
+        # Try plugin system first
+        plugin_parser = self._plugin_manager.get_parser(name)
+        if plugin_parser:
+            return plugin_parser
+        # Fall back to legacy
         return self._parsers.get(name)
 
     def get_parser_for_file(self, path: Union[str, Path]) -> Optional[BaseParser]:
         """
         Get appropriate parser for a file.
+
+        First tries the plugin system, then falls back to legacy storage.
 
         Args:
             path: File path
@@ -205,9 +279,15 @@ class ParserRegistry:
             Parser instance or None if no suitable parser found
         """
         path = Path(path)
+
+        # Try plugin system first
+        plugin_parser = self._plugin_manager.get_parser_for_file(path)
+        if plugin_parser:
+            return plugin_parser
+
+        # Fall back to legacy
         ext = path.suffix.lower()
         parser_name = self._extension_map.get(ext)
-
         if parser_name:
             return self._parsers.get(parser_name)
 
@@ -220,6 +300,8 @@ class ParserRegistry:
         Automatically selects parser based on file extension.
         Falls back to text parser for unknown types.
 
+        First tries the plugin system, then falls back to legacy logic.
+
         Args:
             source: File path or content string
             **kwargs: Additional arguments passed to parser
@@ -230,7 +312,7 @@ class ParserRegistry:
         source_str = str(source)
 
         # First, check if it's a code repository URL
-        code_parser = self._parsers.get("code")
+        code_parser = self.get_parser("code")
         if code_parser:
             # Check if the parser has the is_repository_url method
             try:
@@ -251,7 +333,7 @@ class ParserRegistry:
             if path.exists():
                 # Directory → route to DirectoryParser
                 if path.is_dir():
-                    dir_parser = self._parsers.get("directory")
+                    dir_parser = self.get_parser("directory")
                     if dir_parser:
                         return await dir_parser.parse(path, **kwargs)
                     raise ValueError(
@@ -262,18 +344,46 @@ class ParserRegistry:
                 if parser:
                     return await parser.parse(path, **kwargs)
                 else:
-                    return await self._parsers["text"].parse(path, **kwargs)
+                    text_parser = self.get_parser("text")
+                    if text_parser:
+                        return await text_parser.parse(path, **kwargs)
 
         # Content string - use text parser
-        return await self._parsers["text"].parse_content(source_str, **kwargs)
+        text_parser = self.get_parser("text")
+        if text_parser:
+            return await text_parser.parse_content(source_str, **kwargs)
+
+        # Fallback (shouldn't happen with built-in parsers)
+        raise RuntimeError("No text parser available")
 
     def list_parsers(self) -> List[str]:
-        """List registered parser names."""
-        return list(self._parsers.keys())
+        """
+        List registered parser names.
+
+        Combines names from both plugin system and legacy storage.
+        """
+        plugin_parsers = self._plugin_manager.list_parsers()
+        legacy_parsers = list(self._parsers.keys())
+        # Merge and deduplicate
+        return list(dict.fromkeys(plugin_parsers + legacy_parsers))
 
     def list_supported_extensions(self) -> List[str]:
-        """List all supported file extensions."""
-        return list(self._extension_map.keys())
+        """
+        List all supported file extensions.
+
+        Combines extensions from both plugin system and legacy storage.
+        """
+        plugin_exts = self._plugin_manager.list_supported_extensions()
+        legacy_exts = list(self._extension_map.keys())
+        # Merge and deduplicate
+        return list(dict.fromkeys(plugin_exts + legacy_exts))
+
+    # -- Plugin system accessors (new API) --
+
+    @property
+    def plugin_manager(self) -> ParserPluginManager:
+        """Get the underlying plugin manager."""
+        return self._plugin_manager
 
 
 # Global registry instance

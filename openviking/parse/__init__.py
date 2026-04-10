@@ -18,6 +18,17 @@ from openviking.parse.parsers.html import HTMLParser
 from openviking.parse.parsers.markdown import MarkdownParser
 from openviking.parse.parsers.pdf import PDFParser
 from openviking.parse.parsers.text import TextParser
+
+# Plugin system exports (new)
+from openviking.parse.plugin_base import (
+    BuiltinParserProvider,
+    ParserPluginContext,
+    ParserProvider,
+)
+from openviking.parse.plugin_manager import (
+    ParserPluginManager,
+    get_plugin_manager,
+)
 from openviking.parse.registry import ParserRegistry, get_registry, parse
 from openviking.parse.tree_builder import TreeBuilder
 from openviking.parse.vlm import VLMProcessor
@@ -55,4 +66,10 @@ __all__ = [
     "ClassifiedFile",
     "DirectoryScanResult",
     "scan_directory",
+    # Plugin system (new)
+    "ParserProvider",
+    "ParserPluginContext",
+    "BuiltinParserProvider",
+    "ParserPluginManager",
+    "get_plugin_manager",
 ]

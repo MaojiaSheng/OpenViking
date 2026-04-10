@@ -1,0 +1,17 @@
+name: feishu
+version: "1.0.0"
+description: "Feishu/Lark cloud document parser for OpenViking"
+category: "parser"
+author: "OpenViking Team"
+
+pip_dependencies:
+  - lark-oapi>=1.0.0
+
+hooks: []
+
+custom:
+  supported_urls:
+    - "https://*.feishu.cn/docx/*"
+    - "https://*.feishu.cn/wiki/*"
+    - "https://*.feishu.cn/sheets/*"
+    - "https://*.feishu.cn/base/*"

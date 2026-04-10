@@ -8,7 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openviking.parse.parsers.feishu import FeishuParser
+try:
+    from openviking.parse.parsers.feishu import FeishuParser
+except ImportError:
+    from plugins.parser.feishu.feishu import FeishuParser
 
 
 def _make_block(**kwargs):
@@ -561,7 +564,7 @@ class TestParseAsyncIntegration:
         mock_md_result.parse_time = 0.1
         mock_md_result.meta = {}
 
-        with patch("openviking.parse.parsers.feishu.MarkdownParser") as MockMD:
+        with patch("openviking.parse.parsers.markdown.MarkdownParser") as MockMD:
             mock_md_instance = MagicMock()
 
             async def _mock_parse_content(*a, **kw):
@@ -606,7 +609,7 @@ class TestParseAsyncIntegration:
         mock_md_result.parse_time = 0.1
         mock_md_result.meta = {}
 
-        with patch("openviking.parse.parsers.feishu.MarkdownParser") as MockMD:
+        with patch("openviking.parse.parsers.markdown.MarkdownParser") as MockMD:
             mock_md_instance = MagicMock()
 
             async def _mock_parse_content(*a, **kw):

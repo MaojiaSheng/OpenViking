@@ -117,6 +117,11 @@ class OpenVikingConfig(BaseModel):
         description="Semantic processing configuration (overview/abstract limits)",
     )
 
+    plugins: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Plugin-specific configurations (key: plugin name, value: config dict)",
+    )
+
     auto_generate_l0: bool = Field(
         default=True, description="Automatically generate L0 (abstract) if not provided"
     )
