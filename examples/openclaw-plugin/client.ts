@@ -52,6 +52,7 @@ export type CommitSessionResult = {
   /** Present when wait=true and extraction completed. Keyed by category. */
   memories_extracted?: Record<string, number>;
   error?: string;
+  trace_id?: string;
 };
 
 export type TaskResult = {
@@ -630,25 +631,36 @@ export class OpenVikingClient {
   async addSessionMessage(
     sessionId: string,
     role: string,
-    content: string,
+    parts: Array<{
+      type: "text" | "tool" | "context";
+      text?: string;
+      tool_name?: string;
+      tool_output?: string;
+      tool_status?: string;
+      tool_input?: Record<string, unknown>;
+      tool_id?: string;
+      uri?: string;
+      abstract?: string;
+      context_type?: "memory" | "resource" | "skill";
+    }>,
     agentId?: string,
     createdAt?: string,
   ): Promise<void> {
     const body: {
       role: string;
-      content: string;
+      parts: typeof parts;
       created_at?: string;
-    } = { role, content };
+    } = { role, parts };
     if (createdAt) {
       body.created_at = createdAt;
     }
     await this.emitRoutingDebug(
-      "session message POST",
+      "session message POST (with parts)",
       {
         path: `/api/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
         sessionId,
         role,
-        contentChars: content.length,
+        partCount: parts.length,
         created_at: createdAt ?? null,
       },
       agentId,

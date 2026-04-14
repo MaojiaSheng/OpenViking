@@ -113,6 +113,7 @@ class MkdirRequest(BaseModel):
     """Request model for mkdir."""
 
     uri: str
+    description: Optional[str] = None
 
 
 @router.post("/mkdir")
@@ -123,7 +124,7 @@ async def mkdir(
     """Create directory."""
     service = get_service()
     try:
-        await service.fs.mkdir(request.uri, ctx=_ctx)
+        await service.fs.mkdir(request.uri, ctx=_ctx, description=request.description)
     except AGFSClientError as e:
         # Handle common AGFS errors
         err_msg = str(e).lower()
