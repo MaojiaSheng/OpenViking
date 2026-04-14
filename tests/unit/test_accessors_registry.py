@@ -124,6 +124,11 @@ class TestAccessorRegistry:
         self, registry: AccessorRegistry, tmp_path: Path
     ) -> None:
         """access() falls back to local file when no accessor matches."""
+        from openviking.parse.accessors.local_accessor import LocalAccessor
+
+        # Register LocalAccessor as fallback
+        registry.register(LocalAccessor())
+
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 

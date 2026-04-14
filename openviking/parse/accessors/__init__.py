@@ -9,9 +9,10 @@ This module provides the two-layer architecture for resource processing:
 """
 
 from .base import DataAccessor, LocalResource
-from .feishu import FeishuAccessor
-from .git import GitAccessor
-from .http import HTTPAccessor
+from .feishu_accessor import FeishuAccessor
+from .git_accessor import GitAccessor
+from .http_accessor import HTTPAccessor
+from .local_accessor import LocalAccessor
 from .registry import (
     AccessorRegistry,
     access,
@@ -30,4 +31,5 @@ __all__ = [
     "GitAccessor",
     "HTTPAccessor",
     "FeishuAccessor",
+    "LocalAccessor",
 ]

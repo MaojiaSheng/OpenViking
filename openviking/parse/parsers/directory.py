@@ -474,7 +474,7 @@ class DirectoryParser(BaseParser):
     async def _add_git_metadata(source_path: Path, kwargs: dict) -> None:
         """Add git metadata (branch, commit, repo_name) to kwargs dictionary."""
         try:
-            from openviking.parse.accessors.git import GitAccessor
+            from openviking.parse.accessors.git_accessor import GitAccessor
 
             git_accessor = GitAccessor()
 

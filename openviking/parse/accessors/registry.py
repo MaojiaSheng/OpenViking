@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Union
 
-from .base import DataAccessor, LocalResource, SourceType
+from .base import DataAccessor, LocalResource
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class AccessorRegistry:
         """Register default accessors."""
         # GitAccessor - handles git repositories
         try:
-            from .git import GitAccessor
+            from .git_accessor import GitAccessor
 
             self.register(GitAccessor())
         except Exception as e:
@@ -46,7 +46,7 @@ class AccessorRegistry:
 
         # HTTPAccessor - handles HTTP/HTTPS URLs
         try:
-            from .http import HTTPAccessor
+            from .http_accessor import HTTPAccessor
 
             self.register(HTTPAccessor())
         except Exception as e:
@@ -54,11 +54,19 @@ class AccessorRegistry:
 
         # FeishuAccessor - handles Feishu/Lark documents
         try:
-            from .feishu import FeishuAccessor
+            from .feishu_accessor import FeishuAccessor
 
             self.register(FeishuAccessor())
         except Exception as e:
             logger.debug(f"[AccessorRegistry] Failed to register FeishuAccessor: {e}")
+
+        # LocalAccessor - handles local files (lowest priority)
+        try:
+            from .local_accessor import LocalAccessor
+
+            self.register(LocalAccessor())
+        except Exception as e:
+            logger.debug(f"[AccessorRegistry] Failed to register LocalAccessor: {e}")
 
     def register(self, accessor: DataAccessor) -> None:
         """
@@ -133,8 +141,6 @@ class AccessorRegistry:
         """
         Access a source by routing to the appropriate accessor.
 
-        If no accessor can handle the source, it is treated as a local file.
-
         Args:
             source: Source string (URL, path, etc.) or Path object
             **kwargs: Additional arguments passed to the accessor
@@ -144,7 +150,7 @@ class AccessorRegistry:
         """
         source_str = str(source)
 
-        # Try to find an accessor
+        # Find an accessor - LocalAccessor should always be registered as fallback
         accessor = self.get_accessor(source)
         if accessor:
             logger.debug(
@@ -152,15 +158,10 @@ class AccessorRegistry:
             )
             return await accessor.access(source, **kwargs)
 
-        # Default: treat as local file
-        logger.debug(f"[AccessorRegistry] No accessor found, treating as local file: {source_str}")
-        path = Path(source)
-        return LocalResource(
-            path=path,
-            source_type=SourceType.LOCAL,
-            original_source=source_str,
-            meta={},
-            is_temporary=False,
+        # This should not happen if LocalAccessor is registered
+        raise RuntimeError(
+            f"No accessor found for source: {source_str}. "
+            "LocalAccessor should be registered as a fallback."
         )
 
     def clear(self) -> None:
