@@ -5,20 +5,159 @@ HTTP URL Accessor.
 
 Fetches HTTP/HTTPS URLs and makes them available as local files.
 This is the DataAccessor layer extracted from HTMLParser.
+
+Features:
+- Downloads web pages to local HTML files
+- Downloads files (PDF, Markdown, etc.) to local files
+- Supports GitHub/GitLab blob to raw URL conversion
+- Follows redirects
+- Network guard integration
+- Detailed error classification (network, timeout, auth, etc.)
+- Content-Type detection for URLs without file extensions
 """
 
 import tempfile
+from enum import Enum
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 from urllib.parse import unquote, urlparse
 
 from openviking.parse.base import lazy_import
+from openviking.parse.parsers.constants import CODE_EXTENSIONS
 from openviking.utils.network_guard import build_httpx_request_validation_hooks
 from openviking_cli.utils.logger import get_logger
 
 from .base import DataAccessor, LocalResource, SourceType
 
 logger = get_logger(__name__)
+
+
+class URLType(Enum):
+    """URL content types."""
+
+    WEBPAGE = "webpage"  # HTML webpage to parse
+    DOWNLOAD_PDF = "download_pdf"  # PDF file download link
+    DOWNLOAD_MD = "download_md"  # Markdown file download link
+    DOWNLOAD_TXT = "download_txt"  # Text file download link
+    DOWNLOAD_HTML = "download_html"  # HTML file download link
+    UNKNOWN = "unknown"  # Unknown or unsupported type
+
+
+class URLTypeDetector:
+    """
+    Detector for URL content types.
+
+    Uses extension and HTTP HEAD request to determine if a URL is:
+    - A webpage to scrape
+    - A file download link (and what type)
+    """
+
+    # Extension to URL type mapping
+    # CODE_EXTENSIONS spread comes first so explicit entries below override
+    # (e.g., .html/.htm -> DOWNLOAD_HTML instead of DOWNLOAD_TXT)
+    EXTENSION_MAP: Dict[str, URLType] = {
+        **dict.fromkeys(CODE_EXTENSIONS, URLType.DOWNLOAD_TXT),
+        ".pdf": URLType.DOWNLOAD_PDF,
+        ".md": URLType.DOWNLOAD_MD,
+        ".markdown": URLType.DOWNLOAD_MD,
+        ".txt": URLType.DOWNLOAD_TXT,
+        ".text": URLType.DOWNLOAD_TXT,
+        ".html": URLType.DOWNLOAD_HTML,
+        ".htm": URLType.DOWNLOAD_HTML,
+    }
+
+    # Content-Type to URL type mapping
+    CONTENT_TYPE_MAP: Dict[str, URLType] = {
+        "application/pdf": URLType.DOWNLOAD_PDF,
+        "text/markdown": URLType.DOWNLOAD_MD,
+        "text/plain": URLType.DOWNLOAD_TXT,
+        "text/html": URLType.WEBPAGE,
+        "application/xhtml+xml": URLType.WEBPAGE,
+    }
+
+    # URLType to file extension mapping
+    URL_TYPE_TO_EXT: Dict[URLType, str] = {
+        URLType.WEBPAGE: ".html",
+        URLType.DOWNLOAD_PDF: ".pdf",
+        URLType.DOWNLOAD_MD: ".md",
+        URLType.DOWNLOAD_TXT: ".txt",
+        URLType.DOWNLOAD_HTML: ".html",
+        URLType.UNKNOWN: ".html",
+    }
+
+    def __init__(self, timeout: float = 10.0):
+        """Initialize URL type detector."""
+        self.timeout = timeout
+
+    async def detect(
+        self,
+        url: str,
+        request_validator=None,
+    ) -> Tuple[URLType, Dict[str, Any]]:
+        """
+        Detect URL content type.
+
+        Args:
+            url: URL to detect
+            request_validator: Optional network request validator
+
+        Returns:
+            (URLType, metadata dict)
+        """
+        meta = {"url": url, "detected_by": "unknown"}
+        parsed = urlparse(url)
+        path_lower = parsed.path.lower()
+
+        # 1. Check extension first
+        for ext, url_type in self.EXTENSION_MAP.items():
+            if path_lower.endswith(ext):
+                meta["detected_by"] = "extension"
+                meta["extension"] = ext
+                return url_type, meta
+
+        # 2. Send HEAD request to check Content-Type
+        try:
+            httpx = lazy_import("httpx")
+            client_kwargs = {
+                "timeout": self.timeout,
+                "follow_redirects": True,
+            }
+            event_hooks = build_httpx_request_validation_hooks(request_validator)
+            if event_hooks:
+                client_kwargs["event_hooks"] = event_hooks
+                client_kwargs["trust_env"] = False
+
+            async with httpx.AsyncClient(**client_kwargs) as client:
+                response = await client.head(url)
+                content_type = response.headers.get("content-type", "").lower()
+
+                # Remove charset info
+                if ";" in content_type:
+                    content_type = content_type.split(";")[0].strip()
+
+                meta["content_type"] = content_type
+                meta["detected_by"] = "content_type"
+                meta["status_code"] = response.status_code
+
+                # Map content type
+                for ct_prefix, url_type in self.CONTENT_TYPE_MAP.items():
+                    if content_type.startswith(ct_prefix):
+                        return url_type, meta
+
+                # Default to webpage for HTML-like content
+                if "html" in content_type or "xml" in content_type:
+                    return URLType.WEBPAGE, meta
+
+        except Exception as e:
+            meta["detection_error"] = str(e)
+            logger.debug(f"[URLTypeDetector] HEAD request failed: {e}, falling back to default")
+
+        # 3. Default: assume webpage
+        return URLType.WEBPAGE, meta
+
+    def get_extension_for_type(self, url_type: URLType) -> str:
+        """Get file extension for URL type."""
+        return self.URL_TYPE_TO_EXT.get(url_type, ".html")
 
 
 class HTTPAccessor(DataAccessor):
@@ -50,6 +189,7 @@ class HTTPAccessor(DataAccessor):
         """Initialize HTTP accessor."""
         self.timeout = timeout
         self.user_agent = user_agent or self.DEFAULT_USER_AGENT
+        self._url_detector = URLTypeDetector(timeout=min(timeout, 10.0))
 
     @property
     def priority(self) -> int:
@@ -83,16 +223,19 @@ class HTTPAccessor(DataAccessor):
         request_validator = kwargs.get("request_validator")
 
         # Download the URL
-        temp_path = await self._download_url(
+        temp_path, url_type, meta = await self._download_url(
             source_str,
             request_validator=request_validator,
         )
 
         # Build metadata
-        meta = {
-            "url": source_str,
-            "downloaded": True,
-        }
+        meta.update(
+            {
+                "url": source_str,
+                "downloaded": True,
+                "url_type": url_type.value,
+            }
+        )
 
         return LocalResource(
             path=Path(temp_path),
@@ -124,7 +267,7 @@ class HTTPAccessor(DataAccessor):
         self,
         url: str,
         request_validator=None,
-    ) -> str:
+    ) -> Tuple[str, URLType, Dict[str, Any]]:
         """
         Download URL content to a temporary file.
 
@@ -133,22 +276,32 @@ class HTTPAccessor(DataAccessor):
             request_validator: Optional network request validator
 
         Returns:
-            Path to the temporary file
+            Tuple of (path to temporary file, URLType, metadata dict)
         """
         httpx = lazy_import("httpx")
 
         # Convert GitHub/GitLab blob URLs to raw
         url = self._convert_to_raw_url(url)
 
-        # Determine file extension from URL (decode first to handle encoded paths)
+        # Detect URL type first to get proper extension
+        url_type, detect_meta = await self._url_detector.detect(
+            url,
+            request_validator=request_validator,
+        )
+
+        # Determine file extension
         parsed = urlparse(url)
         decoded_path = unquote(parsed.path)
-        ext = Path(decoded_path).suffix or ".html"
+        ext = Path(decoded_path).suffix
+        if not ext:
+            ext = self._url_detector.get_extension_for_type(url_type)
 
         # Create temp file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
         temp_path = temp_file.name
         temp_file.close()
+
+        meta = {**detect_meta, "extension": ext}
 
         try:
             # Download content
@@ -190,7 +343,7 @@ class HTTPAccessor(DataAccessor):
                 # Write to temp file
                 Path(temp_path).write_bytes(response.content)
 
-            return temp_path
+            return temp_path, url_type, meta
         except Exception:
             # Clean up on error
             try:

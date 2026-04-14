@@ -25,6 +25,14 @@ from openviking.parse.parsers.base_parser import BaseParser
 logger = __import__("openviking_cli.utils.logger").utils.logger.get_logger(__name__)
 
 
+# Backward compatibility: Re-export URLType and URLTypeDetector from http_accessor
+try:
+    from openviking.parse.accessors.http_accessor import URLType, URLTypeDetector
+except ImportError:
+    URLType = None
+    URLTypeDetector = None
+
+
 class HTMLParser(BaseParser):
     """
     Parser for local HTML files.
@@ -42,6 +50,27 @@ class HTMLParser(BaseParser):
     def __init__(self):
         """Initialize HTML parser."""
         pass
+
+    @staticmethod
+    def _extract_filename_from_url(url: str) -> str:
+        """
+        Extract and URL-decode the original filename from a URL.
+
+        Args:
+            url: URL to extract filename from
+
+        Returns:
+            Decoded filename (e.g., "schemas.py" from ".../schemas.py")
+            Falls back to "download" if no filename can be extracted.
+        """
+        from pathlib import Path
+        from urllib.parse import unquote, urlparse
+
+        parsed = urlparse(url)
+        # URL-decode path to handle encoded characters (e.g., %E7%99%BE -> Chinese chars)
+        decoded_path = unquote(parsed.path)
+        basename = Path(decoded_path).name
+        return basename if basename else "download"
 
     def _get_readabilipy(self):
         """Lazy import of readabilipy."""
