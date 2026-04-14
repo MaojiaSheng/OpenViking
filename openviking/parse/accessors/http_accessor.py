@@ -544,8 +544,9 @@ class HTTPAccessor(DataAccessor):
             from openviking_cli.utils.config import get_openviking_config
 
             config = get_openviking_config()
-            github_domains = config.html.github_domains
-            gitlab_domains = config.html.gitlab_domains
+            # NOTE: github_domains/gitlab_domains are in CodeConfig, not HTMLConfig
+            github_domains = config.code.github_domains
+            gitlab_domains = config.code.gitlab_domains
             github_raw_domain = config.code.github_raw_domain
 
             if parsed.netloc in github_domains:
@@ -558,7 +559,10 @@ class HTTPAccessor(DataAccessor):
             if parsed.netloc in gitlab_domains and "/blob/" in parsed.path:
                 return url.replace("/blob/", "/raw/")
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                f"[HTTPAccessor] Failed to convert blob URL to raw: {e}, "
+                f"falling back to original URL: {url}"
+            )
 
         return url
