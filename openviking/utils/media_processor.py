@@ -7,13 +7,53 @@ from typing import TYPE_CHECKING, Optional
 
 from openviking.parse import DocumentConverter, parse
 from openviking.parse.accessors.base import SourceType
+from openviking.parse.accessors.mime_types import IANA_MEDIA_TYPE_TO_EXTENSION
 from openviking.parse.base import ParseResult
+from openviking.parse.parsers.constants import (
+    CODE_EXTENSIONS,
+    DOCUMENTATION_EXTENSIONS,
+    IGNORE_EXTENSIONS,
+)
 from openviking.server.local_input_guard import (
     is_remote_resource_source,
     looks_like_local_path,
 )
 from openviking_cli.exceptions import PermissionDeniedError
 from openviking_cli.utils.logger import get_logger
+
+# All known valid extensions - only these should be stripped when getting stem
+# Build from multiple sources:
+# 1. IANA media type mappings (comprehensive)
+# 2. Code/documentation/ignore extensions (parser-specific)
+KNOWN_EXTENSIONS: set[str] = set()
+for extensions in IANA_MEDIA_TYPE_TO_EXTENSION.values():
+    KNOWN_EXTENSIONS.update(extensions)
+KNOWN_EXTENSIONS.update(CODE_EXTENSIONS)
+KNOWN_EXTENSIONS.update(DOCUMENTATION_EXTENSIONS)
+KNOWN_EXTENSIONS.update(IGNORE_EXTENSIONS)
+
+
+def _smart_stem(path_or_name: str | Path) -> str:
+    """Get the stem of a filename, but only strip known valid extensions.
+
+    For filenames like "2601.00014" where ".00014" is not a valid extension,
+    returns the full name instead of just "2601".
+
+    Args:
+        path_or_name: Path object or string filename
+
+    Returns:
+        Stem with only known extensions stripped
+    """
+    path = Path(path_or_name)
+    suffix = path.suffix.lower()
+
+    if suffix in KNOWN_EXTENSIONS:
+        return path.stem
+
+    # If the suffix is not a known extension, treat the whole name as the stem
+    return path.name
+
 
 if TYPE_CHECKING:
     from openviking.parse.vlm import VLMProcessor
@@ -113,7 +153,7 @@ class UnifiedResourceProcessor:
             # Set resource_name from source_name or path
             source_name = kwargs.get("source_name")
             if source_name:
-                parse_kwargs["resource_name"] = Path(source_name).stem
+                parse_kwargs["resource_name"] = _smart_stem(source_name)
                 parse_kwargs.setdefault("source_name", source_name)
             else:
                 # For git repositories, use repo_name from meta if available
@@ -125,10 +165,10 @@ class UnifiedResourceProcessor:
                     # Prefer original_filename from meta for HTTP downloads
                     original_filename = local_resource.meta.get("original_filename")
                     if original_filename:
-                        parse_kwargs.setdefault("resource_name", Path(original_filename).stem)
+                        parse_kwargs.setdefault("resource_name", _smart_stem(original_filename))
                         parse_kwargs.setdefault("source_name", original_filename)
                     else:
-                        parse_kwargs.setdefault("resource_name", local_resource.path.stem)
+                        parse_kwargs.setdefault("resource_name", _smart_stem(local_resource.path))
 
             # If it's a directory, use DirectoryParser which will delegate to CodeRepositoryParser if it's a git repo
             if local_resource.path.is_dir():

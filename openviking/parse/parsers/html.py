@@ -8,8 +8,6 @@ Parses local HTML files.
 For URL downloading, use HTTPAccessor in the new two-layer architecture.
 """
 
-import hashlib
-import re
 import time
 from pathlib import Path
 from typing import List, Optional, Union
@@ -231,19 +229,3 @@ class HTMLParser(BaseParser):
         result.parser_name = "HTMLParser"
 
         return result
-
-    def _sanitize_for_path(self, text: str, max_length: int = 50) -> str:
-        """Sanitize text for use in file path, hash & shorten if too long."""
-        safe = re.sub(
-            r"[^\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u3400-\u4dbf\U00020000-\U0002a6df\s-]",
-            "",
-            text,
-        )
-        safe = re.sub(r"\s+", "_", safe)
-        safe = safe.strip("_")
-        if not safe:
-            return "section"
-        if len(safe) > max_length:
-            hash_suffix = hashlib.sha256(text.encode()).hexdigest()[:8]
-            return f"{safe[: max_length - 9]}_{hash_suffix}"
-        return safe

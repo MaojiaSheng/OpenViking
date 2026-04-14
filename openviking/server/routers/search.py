@@ -8,12 +8,14 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from openviking.pyagfs.exceptions import AGFSClientError, AGFSNotFoundError
 from openviking.server.auth import get_request_context
 from openviking.server.dependencies import get_service
 from openviking.server.identity import RequestContext
 from openviking.server.models import Response
 from openviking.server.telemetry import run_operation
 from openviking.telemetry import TelemetryRequest
+from openviking_cli.exceptions import NotFoundError
 
 
 def _sanitize_floats(obj: Any) -> Any:
@@ -156,15 +158,24 @@ async def grep(
 ):
     """Content search with pattern."""
     service = get_service()
-    result = await service.fs.grep(
-        request.uri,
-        request.pattern,
-        ctx=_ctx,
-        exclude_uri=request.exclude_uri,
-        case_insensitive=request.case_insensitive,
-        node_limit=request.node_limit,
-        level_limit=request.level_limit,
-    )
+    try:
+        result = await service.fs.grep(
+            request.uri,
+            request.pattern,
+            ctx=_ctx,
+            exclude_uri=request.exclude_uri,
+            case_insensitive=request.case_insensitive,
+            node_limit=request.node_limit,
+            level_limit=request.level_limit,
+        )
+    except AGFSNotFoundError:
+        raise NotFoundError(request.uri, "file")
+    except AGFSClientError as e:
+        # Fallback for older versions without typed exceptions
+        err_msg = str(e).lower()
+        if "not found" in err_msg or "no such file or directory" in err_msg:
+            raise NotFoundError(request.uri, "file")
+        raise
     return Response(status="ok", result=result)
 
 
@@ -175,7 +186,16 @@ async def glob(
 ):
     """File pattern matching."""
     service = get_service()
-    result = await service.fs.glob(
-        request.pattern, ctx=_ctx, uri=request.uri, node_limit=request.node_limit
-    )
+    try:
+        result = await service.fs.glob(
+            request.pattern, ctx=_ctx, uri=request.uri, node_limit=request.node_limit
+        )
+    except AGFSNotFoundError:
+        raise NotFoundError(request.uri or request.pattern, "file")
+    except AGFSClientError as e:
+        # Fallback for older versions without typed exceptions
+        err_msg = str(e).lower()
+        if "not found" in err_msg or "no such file or directory" in err_msg:
+            raise NotFoundError(request.uri or request.pattern, "file")
+        raise
     return Response(status="ok", result=result)
