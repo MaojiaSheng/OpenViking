@@ -216,6 +216,7 @@ class ResourceProcessor:
             # ============ Phase 3.5: 首次添加立即落盘 + 生命周期锁 ============
             root_uri = result.get("root_uri")
             temp_uri = result.get("temp_uri")  # temp_doc_uri
+            original_temp_uri = temp_uri  # 保存原始 temp_uri 用于最终输出
             candidate_uri = getattr(context_tree, "_candidate_uri", None) if context_tree else None
             lifecycle_lock_handle_id = ""
 
@@ -257,7 +258,8 @@ class ResourceProcessor:
                     except Exception:
                         pass
 
-                    result["temp_uri"] = root_uri
+                    # 数据已移动到 root_uri，后续处理使用 root_uri
+                    temp_uri = root_uri
                 else:
                     # 增量更新：对目标目录加 SUBTREE 锁
                     resource_path = viking_fs._uri_to_path(root_uri, ctx=ctx)
@@ -267,7 +269,7 @@ class ResourceProcessor:
 
             # ============ Phase 4: Optional Steps ============
             build_index = kwargs.get("build_index", True)
-            temp_uri_for_summarize = result.get("temp_uri") or parse_result.temp_dir_path
+            temp_uri_for_summarize = temp_uri or parse_result.temp_dir_path
             should_summarize = summarize or build_index
             if should_summarize:
                 skip_vec = not build_index
@@ -293,6 +295,10 @@ class ResourceProcessor:
                 handle = get_lock_manager().get_handle(lifecycle_lock_handle_id)
                 if handle:
                     await get_lock_manager().release(handle)
+
+            # 恢复原始 temp_uri 用于输出
+            if original_temp_uri is not None:
+                result["temp_uri"] = original_temp_uri
 
             return result
 
