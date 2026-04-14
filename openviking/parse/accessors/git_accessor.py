@@ -119,15 +119,57 @@ class GitAccessor(DataAccessor):
             elif source_str.startswith(("http://", "https://", "git://", "ssh://")):
                 repo_url, branch, commit = self._parse_repo_source(source_str, **kwargs)
                 if self._is_github_url(repo_url):
-                    # Use GitHub ZIP API
-                    local_dir, repo_name = await self._github_zip_download(
-                        repo_url, branch or commit, temp_local_dir
-                    )
+                    # Try GitHub ZIP API first, fall back to git clone
+                    try:
+                        local_dir, repo_name = await self._github_zip_download(
+                            repo_url, branch or commit, temp_local_dir
+                        )
+                    except Exception as zip_exc:
+                        logger.warning(
+                            f"[GitAccessor] GitHub ZIP download failed, falling back to git clone: {zip_exc}"
+                        )
+
+                        # Clean up any partial content before cloning
+                        def _cleanup():
+                            for p in Path(temp_local_dir).iterdir():
+                                if p.is_file():
+                                    p.unlink(missing_ok=True)
+                                elif p.is_dir():
+                                    shutil.rmtree(p, ignore_errors=True)
+
+                        await asyncio.to_thread(_cleanup)
+                        repo_name = await self._git_clone(
+                            repo_url,
+                            temp_local_dir,
+                            branch=branch,
+                            commit=commit,
+                        )
                 elif self._is_gitlab_url(repo_url):
-                    # Use GitLab ZIP API
-                    local_dir, repo_name = await self._gitlab_zip_download(
-                        repo_url, branch or commit, temp_local_dir
-                    )
+                    # Try GitLab ZIP API first, fall back to git clone
+                    try:
+                        local_dir, repo_name = await self._gitlab_zip_download(
+                            repo_url, branch or commit, temp_local_dir
+                        )
+                    except Exception as zip_exc:
+                        logger.warning(
+                            f"[GitAccessor] GitLab ZIP download failed, falling back to git clone: {zip_exc}"
+                        )
+
+                        # Clean up any partial content before cloning
+                        def _cleanup():
+                            for p in Path(temp_local_dir).iterdir():
+                                if p.is_file():
+                                    p.unlink(missing_ok=True)
+                                elif p.is_dir():
+                                    shutil.rmtree(p, ignore_errors=True)
+
+                        await asyncio.to_thread(_cleanup)
+                        repo_name = await self._git_clone(
+                            repo_url,
+                            temp_local_dir,
+                            branch=branch,
+                            commit=commit,
+                        )
                 else:
                     # Non-GitHub/GitLab URL: use git clone
                     repo_name = await self._git_clone(
