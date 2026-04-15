@@ -292,19 +292,53 @@ fi
 
 sleep 3
 
-# Verify gateway is stopped
-if ps aux | grep -v grep | grep -q "[o]penclaw"; then
-    log "⚠️  OpenClaw process still running, killing forcefully..."
+# Verify gateway is stopped - kill ALL openclaw processes to prevent multi-instance conflicts
+REMAINING_PIDS=$(ps aux | grep -v grep | grep "[o]penclaw" | awk '{print $2}' || true)
+if [ -n "$REMAINING_PIDS" ]; then
+    REMAINING_COUNT=$(echo "$REMAINING_PIDS" | wc -l)
+    log "⚠️  $REMAINING_COUNT OpenClaw process(es) still running, killing forcefully..."
+    log "PIDs: $REMAINING_PIDS"
     pkill -9 -f "openclaw" || true
     sleep 2
+
+    STILL_RUNNING=$(ps aux | grep -v grep | grep "[o]penclaw" | awk '{print $2}' || true)
+    if [ -n "$STILL_RUNNING" ]; then
+        log "⚠️  WARNING: Some processes could not be killed: $STILL_RUNNING"
+    else
+        log "✅ All OpenClaw processes terminated"
+    fi
 fi
 log "✅ OpenClaw gateway stopped"
 
-# Step 2: Clear OpenClaw cache to force reload Python packages
-log "Step 2: Clearing OpenClaw cache..."
+# Step 2: Clean up OpenClaw stale state (lock files, session locks, cache)
+log "Step 2: Pre-start cleanup for OpenClaw..."
+
+LOCK_COUNT=0
+SESSION_LOCK_COUNT=0
+
+if [ -d ~/.openclaw ]; then
+    LOCK_COUNT=$(find ~/.openclaw -name "*.lock" -type f 2>/dev/null | wc -l)
+    if [ "$LOCK_COUNT" -gt 0 ]; then
+        log "Found $LOCK_COUNT stale lock file(s), removing..."
+        find ~/.openclaw -name "*.lock" -type f -delete 2>/dev/null || true
+        log "✅ Stale lock files removed"
+    else
+        log "No stale lock files found"
+    fi
+
+    SESSION_LOCK_COUNT=$(find ~/.openclaw/agents -name "*.jsonl.lock" -type f 2>/dev/null | wc -l)
+    if [ "$SESSION_LOCK_COUNT" -gt 0 ]; then
+        log "Found $SESSION_LOCK_COUNT stale session lock(s), removing..."
+        find ~/.openclaw/agents -name "*.jsonl.lock" -type f -delete 2>/dev/null || true
+        log "✅ Stale session locks removed"
+    fi
+else
+    log "~/.openclaw directory not found, skipping lock cleanup"
+fi
+
 rm -rf ~/.openclaw/cache/* 2>/dev/null || true
 rm -rf ~/.openclaw/tmp/* 2>/dev/null || true
-log "✅ Cache cleared"
+log "✅ Pre-start cleanup completed (locks: $LOCK_COUNT, session locks: $SESSION_LOCK_COUNT, cache cleared)"
 
 # Step 3: Verify OpenViking installation path before starting
 log "Step 3: Verifying OpenViking installation path..."

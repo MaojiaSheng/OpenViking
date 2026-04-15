@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
+from utils.openclaw_cli_client import _wait_for_session_lock_release
 from utils.test_utils import SessionIdManager
 
 SERVER_URL = os.environ.get("SERVER_URL", "http://127.0.0.1:1933")
@@ -231,6 +232,8 @@ class MemoryV2TestSuite:
 
     def run_openclaw_command(self, message: str, session_id: str) -> Dict[str, Any]:
         """执行 openclaw agent 命令"""
+        _wait_for_session_lock_release(session_id)
+
         cmd = [
             "openclaw",
             "agent",
@@ -240,7 +243,9 @@ class MemoryV2TestSuite:
             message,
             "--json",
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+
+        _wait_for_session_lock_release(session_id)
 
         if result.returncode != 0:
             raise Exception(f"OpenClaw command failed: {result.stderr}")
