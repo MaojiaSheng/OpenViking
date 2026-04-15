@@ -25,6 +25,7 @@ from urllib.parse import unquote, urlparse
 from openviking.parse.base import lazy_import
 from openviking.parse.parsers.constants import CODE_EXTENSIONS
 from openviking.utils.network_guard import build_httpx_request_validation_hooks
+from openviking_cli.exceptions import PermissionDeniedError
 from openviking_cli.utils.logger import get_logger
 
 from .base import DataAccessor, LocalResource, SourceType
@@ -192,6 +193,8 @@ class URLTypeDetector:
                     if url_type != URLType.UNKNOWN:
                         return url_type, meta
 
+        except PermissionDeniedError:
+            raise
         except Exception as e:
             meta["detection_error"] = str(e)
             logger.debug(f"[URLTypeDetector] HEAD request failed: {e}, falling back to default")
