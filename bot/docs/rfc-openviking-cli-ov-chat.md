@@ -302,8 +302,9 @@ Vikingbot 的配置项统一放在 `ov.conf` 的 `bot` 字段下：
       "memory_window": 50
     },
     "gateway": {
-      "host": "0.0.0.0",
-      "port": 18791
+      "host": "127.0.0.1",
+      "port": 18791,
+      "token": ""
     },
     "channels": [
       {"type": "feishu", "enabled": false, "app_id": "", "app_secret": ""}
@@ -319,7 +320,7 @@ Vikingbot 的配置项统一放在 `ov.conf` 的 `bot` 字段下：
 **配置说明 / Configuration Notes:**
 - `server.with_bot`: 启用时自动在同一机器上启动 Vikingbot gateway
 - `bot.agents`: Agent 配置，包括 LLM 模型、最大工具迭代次数、记忆窗口
-- `bot.gateway`: HTTP Gateway 监听地址
+- `bot.gateway`: HTTP Gateway 监听地址；`host` 默认 `127.0.0.1`，当绑定到非 localhost 时必须配置 `token`（用于 `X-Gateway-Token` 鉴权），否则启动失败
 - `bot.channels`: 渠道配置列表，支持 openapi、feishu 等
 - `bot.sandbox`: 沙箱执行配置
 
