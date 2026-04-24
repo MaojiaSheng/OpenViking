@@ -26,7 +26,12 @@ def validate_identifier_part(part: str, part_name: str) -> Optional[str]:
 
 def validate_account_id(account_id: str) -> Optional[str]:
     """Validate an account_id. Returns an error message if invalid, None if valid."""
-    return validate_identifier_part(account_id, "account_id")
+    verr = validate_identifier_part(account_id, "account_id")
+    if verr:
+        return verr
+    if account_id.startswith("_"):
+        return "account_id cannot start with underscore _."
+    return None
 
 
 def validate_user_id(user_id: str) -> Optional[str]:
