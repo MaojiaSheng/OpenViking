@@ -379,9 +379,22 @@ class NewAPIKeyManager:
     def get_account_policy(self, account_id: Optional[str]) -> AccountNamespacePolicy:
         return self._legacy.get_account_policy(account_id)
 
-    def get_users(self, account_id: str) -> list:
+    def get_users(
+        self,
+        account_id: str,
+        limit: int = 100,
+        name_filter: str | None = None,
+        role_filter: str | None = None,
+        expose_key: bool = True,
+    ) -> list:
         """List all users in an account."""
-        return self._legacy.get_users(account_id)
+        return self._legacy.get_users(
+            account_id,
+            limit=limit,
+            name_filter=name_filter,
+            role_filter=role_filter,
+            expose_key=expose_key,
+        )
 
     def has_user(self, account_id: str, user_id: str) -> bool:
         """Return True when the account registry contains the given user."""

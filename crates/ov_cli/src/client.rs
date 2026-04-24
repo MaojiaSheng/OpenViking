@@ -931,9 +931,22 @@ impl HttpClient {
         self.post(&path, &body).await
     }
 
-    pub async fn admin_list_users(&self, account_id: &str) -> Result<Value> {
+    pub async fn admin_list_users(
+        &self,
+        account_id: &str,
+        limit: u32,
+        name: Option<String>,
+        role: Option<String>,
+    ) -> Result<Value> {
         let path = format!("/api/v1/admin/accounts/{}/users", account_id);
-        self.get(&path, &[]).await
+        let mut params = vec![("limit".to_string(), limit.to_string())];
+        if let Some(n) = name {
+            params.push(("name".to_string(), n));
+        }
+        if let Some(r) = role {
+            params.push(("role".to_string(), r));
+        }
+        self.get(&path, &params).await
     }
 
     pub async fn admin_remove_user(&self, account_id: &str, user_id: &str) -> Result<Value> {

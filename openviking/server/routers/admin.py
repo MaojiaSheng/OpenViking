@@ -190,12 +190,18 @@ async def register_user(
 async def list_users(
     request: Request,
     account_id: str = Path(..., description="Account ID"),
+    limit: int = 100,
+    name: str | None = None,
+    role: str | None = None,
     ctx: RequestContext = Depends(get_request_context),
 ):
     """List all users in an account."""
     _check_account_access(ctx, account_id)
     manager = _get_api_key_manager(request)
-    users = manager.get_users(account_id)
+    expose_key = _should_expose_user_key(request)
+    users = manager.get_users(
+        account_id, limit=limit, name_filter=name, role_filter=role, expose_key=expose_key
+    )
     return Response(status="ok", result=users)
 
 

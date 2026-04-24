@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0
 """Legacy API Key management (original implementation)."""
 
+import fnmatch
 import hmac
 import json
 import secrets
@@ -496,20 +497,52 @@ class LegacyAPIKeyManager:
             return AccountNamespacePolicy()
         return account.namespace_policy
 
-    def get_users(self, account_id: str) -> list:
+    def get_users(
+        self,
+        account_id: str,
+        limit: int = 100,
+        name_filter: str | None = None,
+        role_filter: str | None = None,
+        expose_key: bool = True,
+    ) -> list:
         """List all users in an account."""
         account = self._accounts.get(account_id)
         if account is None:
             raise NotFoundError(account_id, "account")
 
         result = []
+        count = 0
         for user_id, user_info in account.users.items():
-            result.append(
-                {
-                    "user_id": user_id,
-                    "role": user_info.get("role", "user"),
-                }
-            )
+            user_role = user_info.get("role", "user")
+
+            # Apply name filter if provided
+            if name_filter and not fnmatch.fnmatch(user_id, name_filter):
+                continue
+
+            # Apply role filter if provided
+            if role_filter and user_role != role_filter:
+                continue
+
+            if count >= limit:
+                break
+
+            user_data = {
+                "user_id": user_id,
+                "role": user_role,
+            }
+            if expose_key:
+                key = user_info.get("key")
+                if key:
+                    if key.startswith("$argon2"):
+                        # Hashed key - show key_prefix
+                        key_prefix = user_info.get("key_prefix")
+                        if key_prefix:
+                            user_data["key_prefix"] = key_prefix
+                    else:
+                        # Plaintext key - show full api_key
+                        user_data["api_key"] = key
+            result.append(user_data)
+            count += 1
         return result
 
     def has_user(self, account_id: str, user_id: str) -> bool:
