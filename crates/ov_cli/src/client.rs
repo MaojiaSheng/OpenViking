@@ -470,9 +470,7 @@ impl HttpClient {
             "dry_run": dry_run,
         });
         if !recursive {
-            body.as_object_mut()
-                .expect("reindex request body must be an object")
-                .insert("recursive".to_string(), serde_json::json!(false));
+            body["recursive"] = serde_json::json!(false);
         }
         if !tags.is_empty() {
             let obj = body
