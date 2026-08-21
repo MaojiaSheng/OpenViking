@@ -582,7 +582,7 @@ This API operates on existing `viking://...` content. It does not import new fil
 | mode | str | No | `vectors_only` | Reindex mode: `vectors_only`, `semantic_and_vectors`, or `prune_orphans` |
 | wait | bool | No | `true` | Whether to wait for completion |
 | dry_run | bool | No | `false` | Only valid with `mode="prune_orphans"`; report orphan vector records without deleting them |
-| recursive | bool | No | `true` | Whether to process child directories recursively; `false` applies only to `semantic_and_vectors` on a `resource`/`memory` directory |
+| recursive | bool | No | `true` | Whether to process descendants recursively; `false` applies only to `semantic_and_vectors` on a `resource`, `memory`, or `skill` directory |
 | tags | list[str] | No | `null` | Write tags to every successfully rebuilt vector record. Omit to preserve existing tags; an empty list with `replace` clears them |
 | tag_mode | str | No | `replace` | Tag write mode: `replace` or `append` |
 
@@ -613,7 +613,7 @@ For `resource` and `skill`, `semantic_and_vectors` refreshes directory/file sema
 
 For `semantic_and_vectors`, semantic generation and vector rebuilding are sequenced by the reindex executor. The semantic refresh step does not enqueue its own background vectorization work; vectors are rebuilt by the reindex step so `wait=true` reflects the reindex operation itself.
 
-For a `resource` or `memory` directory, `recursive=false` regenerates only the target directory's `.abstract.md` and `.overview.md`, then rebuilds only that directory's L0/L1 vectors. Child directories do not regenerate semantic artifacts, and neither child directories nor files are re-vectorized. The target aggregation still reads existing summaries from deterministically sampled child directories; sampled direct files are summarized as inputs to the target aggregation. This flag does not change existing behavior for `vectors_only`, `prune_orphans`, skill, or namespace targets.
+For a `resource` or `memory` directory, `recursive=false` regenerates only the target directory's `.abstract.md` and `.overview.md`, then rebuilds only that directory's L0/L1 vectors. Child directories do not regenerate semantic artifacts, and neither child directories nor files are re-vectorized. The target aggregation still reads existing summaries from deterministically sampled child directories; sampled direct files are summarized as inputs to the target aggregation. For a `skill` target, `recursive=false` regenerates the skill directory's L0/L1 semantic artifacts and vectors from `SKILL.md`, but does not rebuild the `SKILL.md` L2 vector. This flag does not change existing behavior for `vectors_only`, `prune_orphans`, or namespace targets.
 
 For `prune_orphans`, source existence is checked against the filesystem. If an entire directory is missing, vector records for files and semantic sidecars below that directory, such as `.abstract.md` and `.overview.md`, are pruned together. `dry_run` is rejected for other modes.
 

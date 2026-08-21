@@ -31,6 +31,8 @@ def test_semantic_msg_serializes_ingest_options():
     }
     assert restored.generation_trigger == "resource_ingest"
     assert restored.aggregate_directory is True
+    assert restored.use_hierarchical_aggregation is False
+    assert restored.propagate_to_parent is True
 
 
 def test_semantic_msg_reads_legacy_search_tag_fields():
@@ -58,3 +60,17 @@ def test_semantic_msg_round_trips_deferred_aggregation_flag():
     )
 
     assert SemanticMsg.from_json(msg.to_json()).aggregate_directory is False
+
+
+def test_semantic_msg_round_trips_hierarchical_aggregation_policy():
+    msg = SemanticMsg(
+        uri="viking://user/alice/memories",
+        context_type="memory",
+        use_hierarchical_aggregation=True,
+        propagate_to_parent=False,
+    )
+
+    restored = SemanticMsg.from_json(msg.to_json())
+
+    assert restored.use_hierarchical_aggregation is True
+    assert restored.propagate_to_parent is False

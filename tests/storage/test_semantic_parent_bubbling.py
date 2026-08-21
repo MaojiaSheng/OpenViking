@@ -59,6 +59,7 @@ async def test_non_recursive_reindex_does_not_bubble_to_parent(monkeypatch):
         context_type="resource",
         recursive=False,
         generation_trigger="reindex",
+        propagate_to_parent=False,
     )
     await SemanticProcessor()._enqueue_parent_refresh(
         msg, msg.uri, l0_body_changed=True

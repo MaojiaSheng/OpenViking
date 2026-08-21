@@ -553,11 +553,10 @@ class ReindexExecutor:
                     resource_kwargs["recursive"] = False
                 await self._reindex_resource(**resource_kwargs)
             elif object_type == "skill":
-                await self._reindex_skill(
-                    uri=uri,
-                    mode=mode,
-                    run=run,
-                )
+                skill_kwargs = {"uri": uri, "mode": mode, "run": run}
+                if not recursive:
+                    skill_kwargs["recursive"] = False
+                await self._reindex_skill(**skill_kwargs)
             elif object_type == "memory":
                 memory_kwargs = {"uri": uri, "mode": mode, "run": run}
                 if not recursive:
@@ -979,11 +978,19 @@ class ReindexExecutor:
         uri: str,
         mode: str,
         run: _ReindexRunContext,
+        recursive: bool = True,
     ) -> None:
         counters = run.counters
         ctx = run.ctx
         if mode == "semantic_and_vectors":
             await self._regenerate_skill_semantics(uri=uri, ctx=ctx)
+            vector_kwargs = {"uri": uri, "counters": counters, "ctx": ctx}
+            if not recursive:
+                vector_kwargs["recursive"] = False
+            await self._reindex_skill_vectors(
+                **self._with_ingest_options(vector_kwargs, run.ingest_options)
+            )
+            return
         await self._reindex_skill_vectors(
             **self._with_ingest_options(
                 {"uri": uri, "counters": counters, "ctx": ctx},
@@ -1053,6 +1060,8 @@ class ReindexExecutor:
             role=str(ctx.role),
             skip_vectorization=True,
             generation_trigger="reindex",
+            use_hierarchical_aggregation=context_type == "memory",
+            propagate_to_parent=recursive,
         )
         await processor.on_dequeue({"data": msg.to_json()}, lock=lock)
 
@@ -1472,6 +1481,7 @@ class ReindexExecutor:
         uri: str,
         counters: _ReindexCounters,
         ctx: RequestContext,
+        recursive: bool = True,
         ingest_options: IngestOptions | None = None,
     ) -> None:
         viking_fs = get_viking_fs()
@@ -1539,7 +1549,7 @@ class ReindexExecutor:
                 counters.warnings.append(f"Failed to reindex {uri} L1 vector: {exc}")
 
         skill_file_uri = f"{uri}/SKILL.md"
-        if await viking_fs.exists(skill_file_uri, ctx=ctx):
+        if recursive and await viking_fs.exists(skill_file_uri, ctx=ctx):
             counters.scanned_records += 1
             skill_content = await self._safe_read_text(skill_file_uri, ctx=ctx)
             if skill_content:

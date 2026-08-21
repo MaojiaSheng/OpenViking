@@ -65,6 +65,26 @@ def test_markdown_overview_extracts_multiline_brief_description(monkeypatch):
     assert abstract == "This is the first abstract line.\nThis is the second abstract line."
 
 
+def test_directory_coverage_section_is_excluded_from_abstract(monkeypatch):
+    _patch_semantic_limits(monkeypatch)
+    processor = SemanticProcessor()
+    generated = (
+        "# docs-index\n\n"
+        "OpenViking documentation covering agent context, retrieval, and operations.\n\n"
+        "## Directory Coverage\n\n"
+        "This directory contains 513 direct entries; 32 were sampled.\n\n"
+        "## Quick Navigation\n\n"
+        "- Read the getting-started guide"
+    )
+
+    overview, abstract = processor._normalize_overview_generation(generated)
+
+    assert "513 direct entries" in overview
+    assert abstract == (
+        "OpenViking documentation covering agent context, retrieval, and operations."
+    )
+
+
 def test_index_references_are_replaced_inside_markdown_overview(monkeypatch):
     _patch_semantic_limits(monkeypatch)
     processor = SemanticProcessor()

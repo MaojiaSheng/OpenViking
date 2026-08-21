@@ -30,8 +30,9 @@ from openviking_cli.session.user_id import UserIdentifier
 
 
 class _FakeVikingFS:
-    def __init__(self, tree):
+    def __init__(self, tree, abstracts=None):
         self._tree = tree
+        self._abstracts = abstracts or {}
         self.writes = []
         self._async_agfs = self
 
@@ -41,6 +42,9 @@ class _FakeVikingFS:
 
     async def write_file(self, path, content, ctx=None, lease_ref=None):
         self.writes.append((path, content))
+
+    async def abstract(self, uri, ctx=None):
+        return self._abstracts.get(uri, "")
 
     async def pathlock_acquire_exact_batch(self, paths):
         return {"paths": paths}
@@ -58,6 +62,7 @@ class _FakeProcessor:
         self.vectorized_files = []
         self.vectorized_contexts = {}
         self.summarized_files = []
+        self.overview_inputs = []
         self.verify_streaming = verify_streaming
 
     async def _generate_single_file_summary(self, file_path, llm_sem=None, ctx=None):
@@ -68,6 +73,7 @@ class _FakeProcessor:
         return result
 
     async def _generate_overview(self, dir_uri, file_summaries, children_abstracts, **kwargs):
+        self.overview_inputs.append((dir_uri, file_summaries, children_abstracts, kwargs))
         if self.verify_streaming:
             assert all("content" not in item for item in file_summaries)
             assert all(
@@ -264,6 +270,52 @@ async def test_incremental_wide_directory_samples_before_summary_work(monkeypatc
     # outside that sample, are the only files that need summary preparation.
     assert len(processor.summarized_files) <= 5
     assert executor.get_stats().total_nodes <= 6
+
+
+@pytest.mark.asyncio
+async def test_non_recursive_memory_samples_files_and_reads_child_abstracts(monkeypatch):
+    root_uri = "viking://user/alice/memories"
+    child_a = f"{root_uri}/a-child"
+    child_d = f"{root_uri}/d-child"
+    tree = {
+        root_uri: [
+            {"name": "a-child", "isDir": True},
+            {"name": "b.md", "isDir": False},
+            {"name": "c.md", "isDir": False},
+            {"name": "d-child", "isDir": True},
+            {"name": "e.md", "isDir": False},
+            {"name": "f.md", "isDir": False},
+        ],
+        child_a: [{"name": "nested.md", "isDir": False}],
+        child_d: [{"name": "nested.md", "isDir": False}],
+    }
+    fake_fs = _FakeVikingFS(tree, abstracts={child_a: "child a abstract"})
+    monkeypatch.setattr("openviking.storage.queuefs.semantic_dag.get_viking_fs", lambda: fake_fs)
+    _patch_semantic_config(monkeypatch, sidecar_sample_size=3)
+
+    processor = _FakeProcessor()
+    ctx = RequestContext(user=UserIdentifier("acc1", "alice"), role=Role.USER)
+    executor = SemanticDagExecutor(
+        processor=processor,
+        context_type="memory",
+        max_concurrent_llm=2,
+        ctx=ctx,
+        recursive=False,
+        skip_vectorization=True,
+        generation_trigger="reindex",
+    )
+
+    await executor.run(root_uri)
+
+    assert processor.summarized_files == [f"{root_uri}/c.md", f"{root_uri}/f.md"]
+    assert executor.get_stats().total_nodes == 3
+    assert processor.vectorized_files == []
+    assert processor.vectorized_dirs == []
+    _, file_summaries, child_abstracts, coverage = processor.overview_inputs[-1]
+    assert [item["name"] for item in file_summaries] == ["c.md", "f.md"]
+    assert child_abstracts == [{"name": "a-child", "abstract": "child a abstract"}]
+    assert coverage["total_files"] == 4
+    assert coverage["total_children"] == 2
 
 
 @pytest.mark.asyncio

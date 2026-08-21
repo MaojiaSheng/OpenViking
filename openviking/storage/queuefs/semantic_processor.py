@@ -247,7 +247,7 @@ class SemanticProcessor(DequeueHandlerBase):
     ) -> None:
         if msg.context_type not in {"resource", "skill"}:
             return
-        if msg.generation_trigger == "reindex" and not msg.recursive:
+        if not msg.propagate_to_parent:
             return
         parent = VikingURI(uri).parent
         if parent is None:
@@ -408,7 +408,10 @@ class SemanticProcessor(DequeueHandlerBase):
                         ),
                     )
                     try:
-                        if msg.context_type == "memory":
+                        # Regular memory writes keep their specialized update path.
+                        # Callers must explicitly opt into directory aggregation; the
+                        # trigger remains descriptive metadata, not an algorithm switch.
+                        if msg.context_type == "memory" and not msg.use_hierarchical_aggregation:
                             await self._process_memory_directory(
                                 msg,
                                 ctx=current_ctx,
