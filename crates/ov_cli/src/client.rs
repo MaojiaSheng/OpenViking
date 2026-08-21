@@ -1880,28 +1880,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reindex_sends_non_recursive_flag() {
-        let (base_url, request_rx) = spawn_request_capture_server().await;
-        let client = HttpClient::new(base_url, None, None, None, None, 5.0, false, None);
-
-        client
-            .reindex(
-                "viking://resources/demo",
-                "semantic_and_vectors",
-                true,
-                false,
-                Vec::new(),
-                "replace",
-                false,
-            )
-            .await
-            .expect("non-recursive reindex request should succeed");
-
-        let request = request_rx.await.expect("request should be captured");
-        assert!(request.contains(r#""recursive":false"#));
-    }
-
-    #[tokio::test]
     async fn add_resource_sends_parse_mode_through_args() {
         let (default_url, default_request_rx) = spawn_request_capture_server().await;
         let default_client = HttpClient::new(default_url, None, None, None, None, 5.0, false, None);

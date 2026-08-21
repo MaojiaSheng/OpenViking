@@ -1335,7 +1335,7 @@ const COMMAND_HELP_SPECS: &[CommandHelpSpec] = &[
             },
             HelpItem {
                 label: "ov reindex viking://projects/acme --mode semantic_and_vectors --recursive=false",
-                description: "Refresh only the target directory semantics and vectors.",
+                description: "Refresh only the target directory semantics and vectors, without sub-directory.",
             },
             HelpItem {
                 label: "ov reindex viking://projects/acme --mode prune_orphans --dry-run",
