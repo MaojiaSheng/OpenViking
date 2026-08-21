@@ -22,8 +22,8 @@ from openviking.models.rerank import RerankClient
 from openviking.retrieve.memory_lifecycle import hotness_score
 from openviking.retrieve.retrieval_stats import get_stats_collector
 from openviking.server.identity import RequestContext
+from openviking.storage.abstract_overview import body_for_preview
 from openviking.storage.expr import FilterExpr
-from openviking.storage.semantic_sidecar import body_for_preview
 from openviking.storage.vikingdb_manager import VikingDBManager, VikingDBManagerProxy
 from openviking.telemetry import get_current_telemetry
 from openviking.utils.time_utils import parse_iso_datetime

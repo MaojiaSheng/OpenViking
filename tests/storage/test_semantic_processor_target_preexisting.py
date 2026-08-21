@@ -124,6 +124,49 @@ async def test_target_source_syncs_before_semantic_dag(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stale_content_write_keeps_file_work_without_directory_aggregation(monkeypatch):
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.semantic_processor.get_viking_fs",
+        lambda: _FakeVikingFS(),
+    )
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.semantic_processor.SemanticDagExecutor",
+        _FakeDagExecutor,
+    )
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.semantic_processor.SemanticLockScope.resolve",
+        AsyncMock(return_value=SimpleNamespace(lock=None, close=AsyncMock())),
+    )
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.semantic_processor.is_semantic_msg_stale",
+        lambda msg: bool(msg.coalesce_key),
+    )
+
+    _FakeDagExecutor.calls = []
+    _FakeDagExecutor.runs = []
+    processor = SemanticProcessor()
+    processor._enqueue_parent_refresh = AsyncMock()
+    changed = "viking://resources/wiki/changed.md"
+    msg = SemanticMsg(
+        uri="viking://resources/wiki",
+        context_type="resource",
+        recursive=False,
+        coalesce_key="resource|wiki",
+        coalesce_version=1,
+        changes={"modified": [changed], "deleted": ["viking://resources/wiki/old.md"]},
+        generation_trigger="content_write",
+    )
+
+    await processor.on_dequeue(msg.to_dict())
+
+    assert _FakeDagExecutor.calls[0]["aggregate_directory"] is False
+    assert _FakeDagExecutor.calls[0]["changes"] == {"modified": [changed]}
+    assert _FakeDagExecutor.calls[0]["coalesce_key"] == ""
+    assert _FakeDagExecutor.runs == ["viking://resources/wiki"]
+    processor._enqueue_parent_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_sync_wrapper_delegates_to_sync_tree_and_cleans_temp(monkeypatch):
     """The wrapper calls viking_fs.sync_tree and then deletes the temp tree."""
     fake_fs = _SyncWrapperVikingFS(target_exists=True)
@@ -174,7 +217,7 @@ async def test_sync_wrapper_whole_tree_mv_for_new_target(monkeypatch):
         AsyncMock(),
     )
 
-    diff = await SemanticProcessor()._sync_topdown_recursive(
+    await SemanticProcessor()._sync_topdown_recursive(
         "viking://temp/import",
         "viking://resources/root",
         lock=None,
