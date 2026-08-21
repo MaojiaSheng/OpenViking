@@ -367,7 +367,7 @@ class SemanticDagExecutor:
             children_dirs, file_paths = await self._list_dir(dir_uri, "_dispatch_dir")
             sample_limit = getattr(
                 get_openviking_config().semantic,
-                "sidecar_sample_size",
+                "overview_sample_limit",
                 32,
             )
             direct_entries = sorted(

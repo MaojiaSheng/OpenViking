@@ -270,7 +270,7 @@ class SemanticProcessor(DequeueHandlerBase):
             # refresh/ingest bypasses the threshold for its requested root,
             # not for every ancestor reached afterwards.
             force_refresh=False,
-            sidecar_sample_size=getattr(semantic_config, "sidecar_sample_size", 32),
+            overview_sample_limit=getattr(semantic_config, "overview_sample_limit", 32),
             refresh_ratio=getattr(semantic_config, "freshness_refresh_ratio", 0.10),
         )
         if decision.action is not FreshnessAction.REFRESH_NOW:
@@ -732,7 +732,7 @@ class SemanticProcessor(DequeueHandlerBase):
         completed_summaries = [s for s in file_summaries if s is not None]
         sample_limit = getattr(
             get_openviking_config().semantic,
-            "sidecar_sample_size",
+            "overview_sample_limit",
             32,
         )
         sampled_summaries = deterministic_sample(completed_summaries, sample_limit)

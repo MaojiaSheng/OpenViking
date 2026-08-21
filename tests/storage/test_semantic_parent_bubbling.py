@@ -25,7 +25,7 @@ async def test_unchanged_l0_does_not_mark_or_enqueue_parent(monkeypatch):
     monkeypatch.setattr(
         "openviking.storage.queuefs.semantic_processor.get_openviking_config",
         lambda: SimpleNamespace(
-            semantic=SimpleNamespace(sidecar_sample_size=32, freshness_refresh_ratio=0.10)
+            semantic=SimpleNamespace(overview_sample_limit=32, freshness_refresh_ratio=0.10)
         ),
     )
     monkeypatch.setattr(

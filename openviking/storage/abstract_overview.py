@@ -486,7 +486,7 @@ async def plan_abstract_overview_refresh(
     ctx: Optional[RequestContext],
     l0_body_changed: bool = True,
     force_refresh: bool = False,
-    sidecar_sample_size: int = 32,
+    overview_sample_limit: int = 32,
     refresh_ratio: float = 0.10,
 ) -> FreshnessDecision:
     """Atomically record direct-child changes and choose refresh scheduling.
@@ -525,7 +525,7 @@ async def plan_abstract_overview_refresh(
             total_entries=0,
             pending_before=0,
             current_change_count=changed_entries,
-            sidecar_sample_size=sidecar_sample_size,
+            overview_sample_limit=overview_sample_limit,
             refresh_ratio=refresh_ratio,
             force_refresh=force_refresh,
         )
@@ -547,7 +547,7 @@ async def plan_abstract_overview_refresh(
                 total_entries=0,
                 pending_before=0,
                 current_change_count=changed_entries,
-                sidecar_sample_size=sidecar_sample_size,
+                overview_sample_limit=overview_sample_limit,
                 refresh_ratio=refresh_ratio,
                 force_refresh=force_refresh,
             )
@@ -561,7 +561,7 @@ async def plan_abstract_overview_refresh(
             # counter is safer than losing an already-observed change.
             pending_before=max(int(item["pending_child_changes"]) for item in baselines),
             current_change_count=changed_entries,
-            sidecar_sample_size=sidecar_sample_size,
+            overview_sample_limit=overview_sample_limit,
             refresh_ratio=refresh_ratio,
             force_refresh=force_refresh,
         )

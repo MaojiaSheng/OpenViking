@@ -153,10 +153,10 @@ class _ScheduledExecutor:
         self.failure = exc
 
 
-def _patch_semantic_config(monkeypatch, *, sidecar_sample_size=32):
+def _patch_semantic_config(monkeypatch, *, overview_sample_limit=32):
     monkeypatch.setattr(
         "openviking.storage.queuefs.semantic_dag.get_openviking_config",
-        lambda: SimpleNamespace(semantic=SimpleNamespace(sidecar_sample_size=sidecar_sample_size)),
+        lambda: SimpleNamespace(semantic=SimpleNamespace(overview_sample_limit=overview_sample_limit)),
     )
 
 
@@ -248,7 +248,7 @@ async def test_incremental_wide_directory_samples_before_summary_work(monkeypatc
     }
     fake_fs = _FakeVikingFS(tree)
     monkeypatch.setattr("openviking.storage.queuefs.semantic_dag.get_viking_fs", lambda: fake_fs)
-    _patch_semantic_config(monkeypatch, sidecar_sample_size=4)
+    _patch_semantic_config(monkeypatch, overview_sample_limit=4)
 
     processor = _FakeProcessor()
     ctx = RequestContext(user=UserIdentifier("acc1", "user1"), role=Role.USER)
@@ -291,7 +291,7 @@ async def test_non_recursive_memory_samples_files_and_reads_child_abstracts(monk
     }
     fake_fs = _FakeVikingFS(tree, abstracts={child_a: "child a abstract"})
     monkeypatch.setattr("openviking.storage.queuefs.semantic_dag.get_viking_fs", lambda: fake_fs)
-    _patch_semantic_config(monkeypatch, sidecar_sample_size=3)
+    _patch_semantic_config(monkeypatch, overview_sample_limit=3)
 
     processor = _FakeProcessor()
     ctx = RequestContext(user=UserIdentifier("acc1", "alice"), role=Role.USER)
@@ -327,7 +327,7 @@ async def test_deferred_aggregation_processes_only_changed_files(monkeypatch):
     }
     fake_fs = _FakeVikingFS(tree)
     monkeypatch.setattr("openviking.storage.queuefs.semantic_dag.get_viking_fs", lambda: fake_fs)
-    _patch_semantic_config(monkeypatch, sidecar_sample_size=4)
+    _patch_semantic_config(monkeypatch, overview_sample_limit=4)
 
     processor = _FakeProcessor()
     ctx = RequestContext(user=UserIdentifier("acc1", "user1"), role=Role.USER)

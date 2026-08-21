@@ -164,7 +164,7 @@ async def test_direct_incremental_update_uses_changes_without_temp_sync(monkeypa
     monkeypatch.setattr("openviking.storage.queuefs.semantic_dag.get_viking_fs", lambda: fake_fs)
     monkeypatch.setattr(
         "openviking.storage.queuefs.semantic_dag.get_openviking_config",
-        lambda: SimpleNamespace(semantic=SimpleNamespace(sidecar_sample_size=32)),
+        lambda: SimpleNamespace(semantic=SimpleNamespace(overview_sample_limit=32)),
     )
 
     processor = _FakeProcessor(fake_fs)
@@ -219,7 +219,7 @@ async def test_pending_refresh_rebuilds_every_sampled_file_summary(monkeypatch):
     )
     monkeypatch.setattr(
         "openviking.storage.queuefs.semantic_dag.get_openviking_config",
-        lambda: SimpleNamespace(semantic=SimpleNamespace(sidecar_sample_size=4)),
+        lambda: SimpleNamespace(semantic=SimpleNamespace(overview_sample_limit=4)),
     )
 
     processor = _FakeProcessor(fake_fs)
@@ -266,7 +266,7 @@ async def test_directory_vectorization_retries_after_matching_sidecar_write(monk
     )
     monkeypatch.setattr(
         "openviking.storage.queuefs.semantic_dag.get_openviking_config",
-        lambda: SimpleNamespace(semantic=SimpleNamespace(sidecar_sample_size=32)),
+        lambda: SimpleNamespace(semantic=SimpleNamespace(overview_sample_limit=32)),
     )
 
     processor = _FakeProcessor(fake_fs)

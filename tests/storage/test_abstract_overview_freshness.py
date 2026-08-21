@@ -64,7 +64,7 @@ async def test_pending_increment_and_threshold_decision_share_one_snapshot():
         dir_uri=dir_uri,
         changed_entries=1,
         ctx=None,
-        sidecar_sample_size=32,
+        overview_sample_limit=32,
         refresh_ratio=0.10,
     )
     second = await plan_abstract_overview_refresh(
@@ -72,7 +72,7 @@ async def test_pending_increment_and_threshold_decision_share_one_snapshot():
         dir_uri=dir_uri,
         changed_entries=1,
         ctx=None,
-        sidecar_sample_size=32,
+        overview_sample_limit=32,
         refresh_ratio=0.10,
     )
 
@@ -120,7 +120,7 @@ async def test_concurrent_pending_marks_do_not_overwrite_each_other():
                 dir_uri=dir_uri,
                 changed_entries=1,
                 ctx=None,
-                sidecar_sample_size=32,
+                overview_sample_limit=32,
                 refresh_ratio=1.0,
             )
             for _ in range(10)
@@ -145,7 +145,7 @@ async def test_partial_sidecar_baseline_refreshes_immediately():
         dir_uri=dir_uri,
         changed_entries=1,
         ctx=None,
-        sidecar_sample_size=32,
+        overview_sample_limit=32,
         refresh_ratio=1.0,
     )
 

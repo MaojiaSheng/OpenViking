@@ -32,7 +32,7 @@ def decide_parent_refresh(
     total_entries: int,
     pending_before: int,
     current_change_count: int,
-    sidecar_sample_size: int,
+    overview_sample_limit: int,
     refresh_ratio: float,
     force_refresh: bool = False,
 ) -> FreshnessDecision:
@@ -50,7 +50,7 @@ def decide_parent_refresh(
     pending_after = pending_before + current_change_count
     if not has_freshness_baseline:
         return FreshnessDecision(FreshnessAction.REFRESH_NOW, pending_after, total_entries)
-    if force_refresh or total_entries <= sidecar_sample_size:
+    if force_refresh or total_entries <= overview_sample_limit:
         return FreshnessDecision(FreshnessAction.REFRESH_NOW, pending_after, total_entries)
 
     change_ratio = pending_after / max(total_entries, 1)

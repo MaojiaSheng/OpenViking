@@ -52,7 +52,7 @@
 
 ### 3. 采样发生在子项摘要工作之后
 
-当前目录 DAG 会先生成或读取所有直接子项的摘要，最后才使用 `sidecar_sample_size` 选出进入父目录 overview prompt 的部分输入。
+当前目录 DAG 会先生成或读取所有直接子项的摘要，最后才使用 `overview_sample_limit` 选出进入父目录 overview prompt 的部分输入。
 
 这能够限制 prompt 大小，却没有避免未参与本次聚合的子项摘要工作。对于宽目录，如果我们的目标是降低重新摘要成本，就应当在调度本轮父目录聚合所需的子项摘要之前完成有界采样。
 
@@ -161,7 +161,7 @@ REFRESH_NOW
 | 子目录新旧 L0 正文相同 | `NOOP` | 父目录实际输入没有变化 |
 | 父目录不存在有效 sidecar | `REFRESH_NOW` | 没有可继续使用的摘要基线 |
 | 首次导入或显式语义刷新 | `REFRESH_NOW` | 保持调用者意图 |
-| 父目录上次记录的 `total_entries <= sidecar_sample_size` | `REFRESH_NOW` | 小目录变化后直接刷新 |
+| 父目录上次记录的 `total_entries <= overview_sample_limit` | `REFRESH_NOW` | 小目录变化后直接刷新 |
 | 宽目录累计变化率低于阈值 | `MARK_PENDING` | 只更新 freshness，不入队 |
 | 宽目录累计变化率达到阈值 | `REFRESH_NOW` | 入队一次有界父目录刷新 |
 
@@ -176,13 +176,13 @@ REFRESH_NOW
 
 ## 宽目录阈值
 
-继续用 `semantic.sidecar_sample_size` 区分小目录和宽目录，当前默认值为 32。
+继续用 `semantic.overview_sample_limit` 区分小目录和宽目录，当前默认值为 32。
 
 首版只新增一个比例配置：
 
 ```yaml
 semantic:
-  sidecar_sample_size: 32
+  overview_sample_limit: 32
   freshness_refresh_ratio: 0.10
 ```
 
@@ -222,13 +222,13 @@ refresh_threshold = ceil(freshness_refresh_ratio * total_entries)
 因此，阈值触发的任务应被定义为一次当前目录的有界完整聚合：
 
 1. 重新列举当前直接子项。
-2. 根据 `sidecar_sample_size` 选出本轮有界输入。
+2. 根据 `overview_sample_limit` 选出本轮有界输入。
 3. 为本轮选中的输入读取或生成当前摘要。
 4. 生成新的 L1，并从 L1 正文提取 L0。
 5. 写入最新的 `total_entries`、`sampled_entries` 和 `unsampled_entries`。
 6. 消费本轮刷新开始时已经观察到的 pending 计数。
 
-这里的“完整”是指从当前目录状态重新开始一次聚合决策，不是读取宽目录中的全部文件内容。实际进入目录摘要的输入仍受 `sidecar_sample_size` 限制。
+这里的“完整”是指从当前目录状态重新开始一次聚合决策，不是读取宽目录中的全部文件内容。实际进入目录摘要的输入仍受 `overview_sample_limit` 限制。
 
 每次刷新都可以根据当时的目录状态重新进行确定性采样。系统不记录“上次 sample 中有哪些成员”，调度器也不基于 sample membership 做判断。
 
@@ -345,7 +345,7 @@ metadata 从 `pending_child_changes > 0` 重置或减少，也可能造成 raw s
 
 ## 示例
 
-假设一个目录上次生成时有 161 个直接子项，`sidecar_sample_size=32`，刷新比例为 10%。
+假设一个目录上次生成时有 161 个直接子项，`overview_sample_limit=32`，刷新比例为 10%。
 
 1. 子目录 `a/` 完成语义生成，但新旧 L0 相同：不修改父目录 freshness，也不继续冒泡。
 2. 文件 `x.md`、`y.md` 和 `z.md` 发生修改：`pending_child_changes` 变为 3，低于阈值 17，不刷新目录摘要。
