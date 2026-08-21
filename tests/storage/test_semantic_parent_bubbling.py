@@ -45,3 +45,23 @@ async def test_unchanged_l0_does_not_mark_or_enqueue_parent(monkeypatch):
     assert plan.await_args.kwargs["l0_body_changed"] is False
     assert plan.await_args.kwargs["force_refresh"] is False
     get_queue_manager.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_non_recursive_reindex_does_not_bubble_to_parent(monkeypatch):
+    plan = AsyncMock(side_effect=AssertionError("non-recursive reindex must stop at target"))
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.semantic_processor.plan_abstract_overview_refresh", plan
+    )
+
+    msg = SemanticMsg(
+        uri="viking://resources/root/child",
+        context_type="resource",
+        recursive=False,
+        generation_trigger="reindex",
+    )
+    await SemanticProcessor()._enqueue_parent_refresh(
+        msg, msg.uri, l0_body_changed=True
+    )
+
+    plan.assert_not_awaited()

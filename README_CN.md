@@ -137,7 +137,7 @@ ov find "what is openviking"
 ov grep "openviking" --uri viking://resources/volcengine/OpenViking/docs/zh
 ```
 
-重建已有索引：`ov reindex <uri> --mode vectors_only` 只刷新向量；`--mode semantic_and_vectors` 先重新生成语义产物（`.abstract.md`、`.overview.md`）再刷新向量；`--mode prune_orphans` 清理源文件已不存在的向量记录（加 `--dry-run` 可预览）。没有 `semantic` 或 `full` 这样的模式别名。
+重建已有索引：`ov reindex <uri> --mode vectors_only` 只刷新向量；`--mode semantic_and_vectors` 先重新生成语义产物（`.abstract.md`、`.overview.md`）再刷新向量；添加 `--recursive=false` 可只刷新目标目录自身的语义产物及 L0/L1 向量；`--mode prune_orphans` 清理源文件已不存在的向量记录（加 `--dry-run` 可预览）。没有 `semantic` 或 `full` 这样的模式别名。
 
 客户端配置可以用 `ov config` 交互式初始化；有多台服务器时，用 `ov config switch` 切换。
 

@@ -67,7 +67,7 @@ class _FakeProcessor:
             result["content"] = "x" * 100_000
         return result
 
-    async def _generate_overview(self, dir_uri, file_summaries, children_abstracts):
+    async def _generate_overview(self, dir_uri, file_summaries, children_abstracts, **kwargs):
         if self.verify_streaming:
             assert all("content" not in item for item in file_summaries)
             assert all(

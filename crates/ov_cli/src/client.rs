@@ -461,6 +461,7 @@ impl HttpClient {
         dry_run: bool,
         tags: Vec<String>,
         tag_mode: &str,
+        recursive: bool,
     ) -> Result<serde_json::Value> {
         let mut body = serde_json::json!({
             "uri": uri,
@@ -468,6 +469,11 @@ impl HttpClient {
             "wait": wait,
             "dry_run": dry_run,
         });
+        if !recursive {
+            body.as_object_mut()
+                .expect("reindex request body must be an object")
+                .insert("recursive".to_string(), serde_json::json!(false));
+        }
         if !tags.is_empty() {
             let obj = body
                 .as_object_mut()
@@ -1873,6 +1879,28 @@ mod tests {
         let mut body = json!({"path": "x", "args": {"feishu_access_token": "u-x"}});
         super::compact_request_body(&mut body);
         assert!(body.as_object().unwrap().contains_key("args"));
+    }
+
+    #[tokio::test]
+    async fn reindex_sends_non_recursive_flag() {
+        let (base_url, request_rx) = spawn_request_capture_server().await;
+        let client = HttpClient::new(base_url, None, None, None, None, 5.0, false, None);
+
+        client
+            .reindex(
+                "viking://resources/demo",
+                "semantic_and_vectors",
+                true,
+                false,
+                Vec::new(),
+                "replace",
+                false,
+            )
+            .await
+            .expect("non-recursive reindex request should succeed");
+
+        let request = request_rx.await.expect("request should be captured");
+        assert!(request.contains(r#""recursive":false"#));
     }
 
     #[tokio::test]

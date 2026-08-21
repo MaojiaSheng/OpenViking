@@ -1155,6 +1155,15 @@ enum Commands {
             help_heading = "Common options"
         )]
         tag_mode: String,
+        /// Recursively reindex subdirectories (only affects semantic_and_vectors)
+        #[arg(
+            long,
+            default_value_t = true,
+            action = ArgAction::Set,
+            value_name = "bool",
+            help_heading = "Common options"
+        )]
+        recursive: bool,
     },
 }
 
@@ -3501,7 +3510,10 @@ async fn main() {
             dry_run,
             tags,
             tag_mode,
-        } => handlers::handle_reindex(uri, mode, wait, dry_run, tags, tag_mode, ctx).await,
+            recursive,
+        } => {
+            handlers::handle_reindex(uri, mode, wait, dry_run, tags, tag_mode, recursive, ctx).await
+        }
         Commands::Get { uri, local_path } => handlers::handle_get(uri, local_path, ctx).await,
         Commands::Find {
             query,
@@ -5355,13 +5367,20 @@ mod tests {
             "team=search",
             "--tag-mode",
             "append",
+            "--recursive=false",
         ]);
 
         let cli = result.expect("reindex command should parse");
         match cli.command {
-            Commands::Reindex { tags, tag_mode, .. } => {
+            Commands::Reindex {
+                tags,
+                tag_mode,
+                recursive,
+                ..
+            } => {
                 assert_eq!(tags, vec!["team=search"]);
                 assert_eq!(tag_mode, "append");
+                assert!(!recursive);
             }
             _ => panic!("expected reindex command"),
         }

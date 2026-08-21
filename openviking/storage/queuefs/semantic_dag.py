@@ -909,7 +909,11 @@ class SemanticDagExecutor:
                 if overview is None:
                     async with self._llm_sem:
                         overview = await self._processor._generate_overview(
-                            dir_uri, file_summaries, children_abstracts
+                            dir_uri,
+                            file_summaries,
+                            children_abstracts,
+                            total_files=len(node.file_paths),
+                            total_children=len(node.children_dirs),
                         )
                 overview, abstract = self._processor._normalize_overview_generation(overview)
 

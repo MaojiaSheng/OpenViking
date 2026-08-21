@@ -92,6 +92,7 @@ class ReindexRequest(BaseModel):
     mode: str = "vectors_only"
     wait: bool = True
     dry_run: bool = False
+    recursive: bool = True
     tags: list[str] | None = None
     tag_mode: str = "replace"
 
@@ -322,6 +323,8 @@ async def reindex(
         "dry_run": body.dry_run,
         "ctx": ctx,
     }
+    if not body.recursive:
+        reindex_kwargs["recursive"] = False
     if body.tags is not None:
         reindex_kwargs["tags"] = body.tags
         reindex_kwargs["tag_mode"] = body.tag_mode
