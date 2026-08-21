@@ -20,7 +20,7 @@ from openviking.storage.queuefs.semantic_dag import (
     SemanticDagExecutor,
     SemanticNodeScheduler,
 )
-from openviking.storage.semantic_sidecar import parse_semantic_sidecar
+from openviking.storage.abstract_overview import parse_abstract_overview
 from openviking.telemetry import (
     OperationTelemetry,
     bind_telemetry,
@@ -57,9 +57,11 @@ class _FakeProcessor:
         self.vectorized_dirs = []
         self.vectorized_files = []
         self.vectorized_contexts = {}
+        self.summarized_files = []
         self.verify_streaming = verify_streaming
 
     async def _generate_single_file_summary(self, file_path, llm_sem=None, ctx=None):
+        self.summarized_files.append(file_path)
         result = {"name": file_path.split("/")[-1], "summary": "summary"}
         if self.verify_streaming:
             result["content"] = "x" * 100_000
@@ -233,6 +235,70 @@ async def test_semantic_dag_bounds_active_node_work(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_incremental_wide_directory_samples_before_summary_work(monkeypatch):
+    root_uri = "viking://resources/wide"
+    tree = {
+        root_uri: [{"name": f"file-{idx:03}.txt", "isDir": False} for idx in range(40)],
+    }
+    fake_fs = _FakeVikingFS(tree)
+    monkeypatch.setattr("openviking.storage.queuefs.semantic_dag.get_viking_fs", lambda: fake_fs)
+    _patch_semantic_config(monkeypatch, sidecar_sample_size=4)
+
+    processor = _FakeProcessor()
+    ctx = RequestContext(user=UserIdentifier("acc1", "user1"), role=Role.USER)
+    executor = SemanticDagExecutor(
+        processor=processor,
+        context_type="resource",
+        max_concurrent_llm=2,
+        ctx=ctx,
+        incremental_update=True,
+        target_uri=root_uri,
+        recursive=False,
+        changes={"modified": [f"{root_uri}/file-020.txt"]},
+        skip_vectorization=True,
+    )
+
+    await executor.run(root_uri)
+
+    # Four deterministic aggregation inputs plus the changed file, when it is
+    # outside that sample, are the only files that need summary preparation.
+    assert len(processor.summarized_files) <= 5
+    assert executor.get_stats().total_nodes <= 6
+
+
+@pytest.mark.asyncio
+async def test_deferred_aggregation_processes_only_changed_files(monkeypatch):
+    root_uri = "viking://resources/wide"
+    changed = f"{root_uri}/file-020.txt"
+    tree = {
+        root_uri: [{"name": f"file-{idx:03}.txt", "isDir": False} for idx in range(40)],
+    }
+    fake_fs = _FakeVikingFS(tree)
+    monkeypatch.setattr("openviking.storage.queuefs.semantic_dag.get_viking_fs", lambda: fake_fs)
+    _patch_semantic_config(monkeypatch, sidecar_sample_size=4)
+
+    processor = _FakeProcessor()
+    ctx = RequestContext(user=UserIdentifier("acc1", "user1"), role=Role.USER)
+    executor = SemanticDagExecutor(
+        processor=processor,
+        context_type="resource",
+        max_concurrent_llm=2,
+        ctx=ctx,
+        incremental_update=True,
+        target_uri=root_uri,
+        recursive=False,
+        changes={"modified": [changed]},
+        aggregate_directory=False,
+    )
+
+    await executor.run(root_uri)
+
+    assert processor.vectorized_files == [changed]
+    assert processor.vectorized_dirs == []
+    assert executor.get_stats().total_nodes == 2
+
+
+@pytest.mark.asyncio
 async def test_semantic_dag_shares_node_scheduler_across_roots(monkeypatch):
     root_a = "viking://resources/root-a"
     root_b = "viking://resources/root-b"
@@ -364,14 +430,14 @@ async def test_semantic_dag_skip_vectorization_does_not_schedule_tasks(monkeypat
         f"{root_uri}/.overview.md",
         f"{root_uri}/.abstract.md",
     ]
-    assert [parse_semantic_sidecar(raw).body.strip() for _, raw in fake_fs.writes] == [
+    assert [parse_abstract_overview(raw).body.strip() for _, raw in fake_fs.writes] == [
         "overview",
         "abstract",
         "overview",
         "abstract",
     ]
     assert all(
-        parse_semantic_sidecar(raw).metadata["generated_by"]["component"] == "SemanticProcessor"
+        parse_abstract_overview(raw).metadata["generated_by"]["component"] == "SemanticProcessor"
         for _, raw in fake_fs.writes
     )
     assert processor.vectorized_dirs == []

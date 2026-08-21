@@ -33,7 +33,7 @@ from openviking.storage.expr import And, Eq, Or, PathScope
 from openviking.storage.queuefs.embedding_msg_converter import EmbeddingMsgConverter
 from openviking.storage.queuefs.semantic_msg import SemanticMsg
 from openviking.storage.queuefs.semantic_processor import SemanticProcessor
-from openviking.storage.semantic_sidecar import body_for_preview, embedding_text_for_body
+from openviking.storage.abstract_overview import body_for_preview, embedding_text_for_body
 from openviking.storage.viking_fs import get_viking_fs
 from openviking.telemetry import get_current_telemetry
 from openviking.telemetry.request_wait_tracker import get_request_wait_tracker
@@ -1033,6 +1033,7 @@ class ReindexExecutor:
             peer_id=owner_ctx.user.user_id,
             role=str(ctx.role),
             skip_vectorization=True,
+            generation_trigger="reindex",
         )
         await processor.on_dequeue({"data": msg.to_json()}, lock=lock)
 

@@ -6,7 +6,7 @@
 
 ### abstract()
 
-读取 L0 摘要（约 100 token 的概要）。
+读取 L0 摘要（约 100 token 的概要），不包括 okf 文件头。
 
 **参数**
 
@@ -72,7 +72,7 @@ openviking abstract viking://resources/docs/
 
 ### overview()
 
-读取 L1 概览，适用于目录。
+读取 L1 概览，适用于目录，不包括 okf 文件头。
 
 **参数**
 
@@ -137,7 +137,7 @@ openviking overview viking://resources/docs/
 
 ### read()
 
-读取 L2 完整内容。
+读取 L0/L1/L2 文件完整文本内容。
 
 **参数**
 
@@ -359,6 +359,7 @@ openviking write viking://resources/docs/api.md \
 - 如果目标已经包含期望字节，则归入 `unchanged`；因此刷新失败后可以安全重试，而不会重复写入相同内容。
 - API 能保证前置条件冲突不会产生新写入，但底层 I/O 中途失败时，本批次较早完成的写入仍可能已经可见。
 - 已存在的 `.abstract.md` / `.overview.md` 可以通过 `replace_if_hash` 修改正文。系统保留并校验受保护的 OKF metadata，拒绝 `create_if_absent` 创建 sidecar；这类操作只重建对应目录实际存在的 L0/L1 向量。
+- 响应体中，通过 `semantic_status`（`queued`、`complete` 或 `deferred`）表达目录聚合状态，通过 `vector_status` 表达变化文件的向量维护状态。
 
 **Python SDK**
 
@@ -417,6 +418,8 @@ curl -X POST http://localhost:1933/api/v1/content/batch-write \
     "created": ["viking://resources/wiki/new.md"],
     "updated": [],
     "unchanged": [],
+    "semantic_status": "complete",
+    "vector_status": "complete",
     "queue_status": {
       "Semantic": {
         "processed": 1,

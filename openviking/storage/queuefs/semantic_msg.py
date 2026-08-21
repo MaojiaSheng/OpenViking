@@ -63,6 +63,7 @@ class SemanticMsg:
     )
     source: Optional[Dict[str, str]] = None
     generation_trigger: str = "semantic_refresh"
+    aggregate_directory: bool = True
 
     def __init__(
         self,
@@ -85,6 +86,7 @@ class SemanticMsg:
         changes: Optional[Dict[str, List[str]]] = None,
         source: Optional[Dict[str, str]] = None,
         generation_trigger: str = "semantic_refresh",
+        aggregate_directory: bool = True,
     ):
         self.id = str(uuid4())
         self.uri = uri
@@ -106,6 +108,7 @@ class SemanticMsg:
         self.changes = changes
         self.source = dict(source) if source else None
         self.generation_trigger = generation_trigger
+        self.aggregate_directory = bool(aggregate_directory)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert object to dictionary."""
@@ -160,6 +163,7 @@ class SemanticMsg:
             changes=data.get("changes"),
             source=data.get("source"),
             generation_trigger=data.get("generation_trigger", "semantic_refresh"),
+            aggregate_directory=data.get("aggregate_directory", True),
         )
         if "id" in data and data["id"]:
             obj.id = data["id"]

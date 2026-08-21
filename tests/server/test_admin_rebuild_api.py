@@ -2105,7 +2105,7 @@ async def test_reindex_resource_vector_text_summary_first_skips_content_read(mon
 @pytest.mark.asyncio
 async def test_reindex_file_summary_reads_existing_record_as_uri_owner(monkeypatch):
     from openviking.service.reindex_executor import ReindexExecutor
-    from openviking.storage.semantic_sidecar import render_semantic_sidecar
+    from openviking.storage.abstract_overview import render_abstract_overview
 
     captured = {}
 
@@ -2133,7 +2133,7 @@ async def test_reindex_file_summary_reads_existing_record_as_uri_owner(monkeypat
     assert summary == "owner summary"
     assert captured["ctx"].user.user_id == "bob"
 
-    raw = render_semantic_sidecar(
+    raw = render_abstract_overview(
         ContextLevel.OVERVIEW,
         "viking://resources/demo",
         "# Demo\n\n## image.png\nVisible file summary.",

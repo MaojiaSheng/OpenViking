@@ -15,7 +15,7 @@ from openviking.session.memory.dataclass import ResolvedOperation, ResolvedOpera
 from openviking.session.memory.memory_type_registry import MemoryTypeRegistry
 from openviking.session.memory.merge_op import MergeOpFactory
 from openviking.storage.content_write import ContentWriteCoordinator
-from openviking.storage.semantic_sidecar import body_for_preview
+from openviking.storage.abstract_overview import body_for_preview
 from openviking.storage.viking_fs import VikingFS, get_viking_fs
 from openviking.utils.skill_processor import SkillProcessor
 from openviking_cli.exceptions import NotFoundError

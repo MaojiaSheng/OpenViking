@@ -6,7 +6,7 @@ The Content API reads L0/L1/L2 content, writes text, and maintains semantic and 
 
 ### abstract()
 
-Read L0 abstract (~100 tokens summary).
+Read the L0 abstract (an approximately 100-token summary), excluding the OKF header.
 
 **Parameters**
 
@@ -72,7 +72,7 @@ openviking abstract viking://resources/docs/
 
 ### overview()
 
-Read L1 overview, applies to directories.
+Read the L1 overview for a directory, excluding the OKF header.
 
 **Parameters**
 
@@ -137,7 +137,7 @@ openviking overview viking://resources/docs/
 
 ### read()
 
-Read L2 full content.
+Read the complete text of an L0, L1, or L2 file.
 
 **Parameters**
 
@@ -359,6 +359,7 @@ Each operation contains:
 - If a target already contains the requested bytes, it is reported as `unchanged`; retrying the same request can therefore repeat a failed refresh without rewriting matching content.
 - The API prevents precondition conflicts from causing new writes, but an underlying I/O failure can still leave writes completed earlier in the batch visible.
 - Existing `.abstract.md` and `.overview.md` bodies may be updated with `replace_if_hash`. OpenViking preserves and validates protected OKF metadata, rejects `create_if_absent` for sidecars, and rebuilds only the directory's existing L0/L1 vectors for these operations.
+- In the response body, `semantic_status` (`queued`, `complete`, or `deferred`) reports the directory aggregation status, while `vector_status` reports vector maintenance for changed files.
 
 **Python SDK**
 
@@ -417,6 +418,8 @@ curl -X POST http://localhost:1933/api/v1/content/batch-write \
     "created": ["viking://resources/wiki/new.md"],
     "updated": [],
     "unchanged": [],
+    "semantic_status": "complete",
+    "vector_status": "complete",
     "queue_status": {
       "Semantic": {
         "processed": 1,

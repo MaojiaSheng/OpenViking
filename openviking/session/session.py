@@ -44,7 +44,7 @@ from openviking.session.tool_result_synopsis import (
     ToolResultSynopsis,
     generate_tool_result_synopsis,
 )
-from openviking.storage.semantic_sidecar import body_for_preview, render_semantic_sidecar
+from openviking.storage.abstract_overview import body_for_preview, render_abstract_overview
 from openviking.telemetry import get_current_telemetry, tracer
 from openviking.telemetry.request_wait_tracker import get_request_wait_tracker
 from openviking.utils.model_retry import is_retryable_api_error, retry_async
@@ -2458,7 +2458,7 @@ class Session:
                             abstract = self._extract_abstract_from_summary(summary)
                             await self._viking_fs.write_file(
                                 uri=f"{archive_uri}/.abstract.md",
-                                content=render_semantic_sidecar(
+                                content=render_abstract_overview(
                                     ContextLevel.ABSTRACT,
                                     archive_uri,
                                     abstract,
@@ -2473,7 +2473,7 @@ class Session:
                             )
                             await self._viking_fs.write_file(
                                 uri=f"{archive_uri}/.overview.md",
-                                content=render_semantic_sidecar(
+                                content=render_abstract_overview(
                                     ContextLevel.OVERVIEW,
                                     archive_uri,
                                     summary,
@@ -5211,7 +5211,7 @@ class Session:
         )
         await viking_fs.write_file(
             uri=f"{self._session_uri}/.abstract.md",
-            content=render_semantic_sidecar(
+            content=render_abstract_overview(
                 ContextLevel.ABSTRACT,
                 self._session_uri,
                 abstract,
@@ -5227,7 +5227,7 @@ class Session:
         )
         await viking_fs.write_file(
             uri=f"{self._session_uri}/.overview.md",
-            content=render_semantic_sidecar(
+            content=render_abstract_overview(
                 ContextLevel.OVERVIEW,
                 self._session_uri,
                 overview,

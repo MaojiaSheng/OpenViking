@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from openviking.core.context import ContextLevel
 from openviking.storage.queuefs import semantic_processor as semantic_processor_module
 from openviking.storage.queuefs.semantic_processor import SemanticProcessor
-from openviking.storage.semantic_sidecar import render_semantic_sidecar
+from openviking.storage.abstract_overview import render_abstract_overview
 
 
 def _patch_semantic_limits(monkeypatch, *, abstract_max_chars=256, overview_max_chars=4000):
@@ -34,7 +34,7 @@ def test_markdown_overview_uses_brief_description_as_abstract(monkeypatch):
     assert overview == generated
     assert abstract == "This brief description is the retrieval abstract."
 
-    raw = render_semantic_sidecar(
+    raw = render_abstract_overview(
         ContextLevel.OVERVIEW,
         "viking://resources/demo",
         generated,

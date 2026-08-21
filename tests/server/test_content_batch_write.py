@@ -6,6 +6,7 @@ import pytest
 import openviking.storage.content_write as content_write_module
 from openviking.server.identity import RequestContext, Role
 from openviking.storage.content_write import ContentWriteCoordinator
+from openviking.storage.queuefs.semantic_ops.freshness_policy import FreshnessAction
 from openviking_cli.exceptions import (
     ConflictError,
     InvalidArgumentError,
@@ -196,6 +197,42 @@ async def test_batch_releases_tree_lock_before_one_aggregated_refresh(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_batch_reports_deferred_directory_and_queued_file_vectors(monkeypatch):
+    root = "viking://resources/wide"
+    page = f"{root}/page.md"
+    coordinator = ContentWriteCoordinator(_VFS(root))
+
+    async def resolve_root(uri, **kwargs):
+        del uri, kwargs
+        return root
+
+    async def enqueue(**kwargs):
+        del kwargs
+        return FreshnessAction.MARK_PENDING
+
+    monkeypatch.setattr(coordinator, "_resolve_root_uri", resolve_root)
+    monkeypatch.setattr(coordinator, "_enqueue_semantic_refresh_changes", enqueue)
+    ctx = RequestContext(user=UserIdentifier.the_default_user(), role=Role.USER)
+
+    result = await coordinator.batch_write(
+        root_uri=root,
+        operations=[
+            {
+                "uri": page,
+                "content": "content",
+                "precondition": {"kind": "create_if_absent"},
+            }
+        ],
+        ctx=ctx,
+        wait=False,
+    )
+
+    assert result["semantic_status"] == "deferred"
+    assert result["vector_status"] == "queued"
+    assert result["queue_status"] is None
+
+
+@pytest.mark.asyncio
 async def test_batch_writes_and_hashes_binary_content(monkeypatch):
     root = "viking://resources/wiki"
     image = f"{root}/figure.png"
@@ -355,6 +392,7 @@ async def test_batch_refresh_groups_resource_and_memory_work(monkeypatch):
 
     async def enqueue(**kwargs):
         semantic_calls.append(kwargs)
+        return FreshnessAction.MARK_PENDING
 
     async def overview(**kwargs):
         overview_calls.append(kwargs)
@@ -368,7 +406,7 @@ async def test_batch_refresh_groups_resource_and_memory_work(monkeypatch):
     monkeypatch.setattr(content_write_module.MemoryUpdater, "refresh_schema_overview", overview)
     monkeypatch.setattr(content_write_module.MemoryUpdater, "refresh_file_embedding", embedding)
     ctx = RequestContext(user=UserIdentifier.the_default_user(), role=Role.USER)
-    await coordinator._refresh_batch(
+    outcome = await coordinator._refresh_batch(
         refresh_kinds={
             "viking://resources/wiki/a.md": "added",
             "viking://resources/wiki/b.md": "modified",
@@ -388,6 +426,7 @@ async def test_batch_refresh_groups_resource_and_memory_work(monkeypatch):
     assert len(overview_calls) == 1
     assert overview_calls[0]["strict"] is True
     assert len(embedding_calls) == 2
+    assert outcome.statuses(wait=False) == ("deferred", "queued")
     assert all(call["strict"] is True for call in embedding_calls)
 
 

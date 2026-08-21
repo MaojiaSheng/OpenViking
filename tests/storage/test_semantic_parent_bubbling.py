@@ -1,0 +1,47 @@
+# Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
+# SPDX-License-Identifier: AGPL-3.0
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from openviking.storage.queuefs.semantic_msg import SemanticMsg
+from openviking.storage.queuefs.semantic_ops.freshness_policy import (
+    FreshnessAction,
+    FreshnessDecision,
+)
+from openviking.storage.queuefs.semantic_processor import SemanticProcessor
+
+
+@pytest.mark.asyncio
+async def test_unchanged_l0_does_not_mark_or_enqueue_parent(monkeypatch):
+    plan = AsyncMock(
+        return_value=FreshnessDecision(FreshnessAction.NOOP, pending_after=3, total_entries=161)
+    )
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.semantic_processor.plan_abstract_overview_refresh", plan
+    )
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.semantic_processor.get_openviking_config",
+        lambda: SimpleNamespace(
+            semantic=SimpleNamespace(sidecar_sample_size=32, freshness_refresh_ratio=0.10)
+        ),
+    )
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.semantic_processor.get_viking_fs",
+        lambda: SimpleNamespace(),
+    )
+    get_queue_manager = AsyncMock(side_effect=AssertionError("parent must not be enqueued"))
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.get_queue_manager", get_queue_manager
+    )
+
+    msg = SemanticMsg(uri="viking://resources/root/child", context_type="resource")
+    await SemanticProcessor()._enqueue_parent_refresh(
+        msg, msg.uri, l0_body_changed=False
+    )
+
+    assert plan.await_args.kwargs["l0_body_changed"] is False
+    assert plan.await_args.kwargs["force_refresh"] is False
+    get_queue_manager.assert_not_called()
