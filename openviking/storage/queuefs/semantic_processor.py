@@ -1060,14 +1060,32 @@ class SemanticProcessor(DequeueHandlerBase):
         else:
             return await self._generate_text_summary(file_path, file_name, llm_sem, ctx=ctx)
 
-    def _replace_index_references(
-        self, generated_content: str, file_index_map: Dict[int, str]
+    def _child_summary_line(
+        self,
+        dir_uri: str,
+        idx: int,
+        item: Dict[str, str],
+        link_map: Dict[str, str],
     ) -> str:
-        def replace_index(match):
-            idx = int(match.group(1))
-            return file_index_map.get(idx, match.group(0))
+        """Render a subdirectory summary line with a collision-free link placeholder."""
+        placeholder = f"viking://input_sample_c{idx}"
+        link_map[placeholder] = f"{dir_uri}/{item['name']}"
+        return f"- {item['name']}/ (link: {placeholder}): {item['abstract']}"
 
-        return re.sub(r"\[(\d+)\]", replace_index, generated_content)
+    def _replace_link_references(
+        self, generated_content: str, link_map: Dict[str, str]
+    ) -> str:
+        """Resolve link placeholders (viking://input_sample_fN / cN) to real URIs.
+
+        The model is fed compact, collision-free placeholders and asked to emit
+        Markdown links against them; here we map each placeholder back to the
+        entry's real URI. Unknown placeholders are left untouched.
+        """
+
+        def replace_link(match):
+            return link_map.get(match.group(0), match.group(0))
+
+        return re.sub(r"viking://input_sample_[fc]\d+", replace_link, generated_content)
 
     def _truncate_generated_text(self, text: str, max_chars: int) -> str:
         if max_chars <= 0 or len(text) <= max_chars:
@@ -1253,17 +1271,27 @@ class SemanticProcessor(DequeueHandlerBase):
                 "entries; generalize cautiously and do not treat them as exhaustive."
             )
 
-        # Build file index mapping and summary string
-        file_index_map = {}
+        # Build link placeholder mapping and summary string.
+        # The model is fed collision-free placeholders (viking://input_sample_fN)
+        # and asked to emit Markdown links; placeholders are resolved to real
+        # URIs in post-processing. This avoids the fragility of bare [N] indices
+        # and of asking the model to reproduce long/CJK URIs verbatim.
+        link_map: Dict[str, str] = {}
         file_summaries_lines = []
         for idx, item in enumerate(file_summaries, 1):
-            file_index_map[idx] = item["name"]
-            file_summaries_lines.append(f"[{idx}] {item['name']}: {item['summary']}")
+            placeholder = f"viking://input_sample_f{idx}"
+            link_map[placeholder] = f"{dir_uri}/{item['name']}"
+            file_summaries_lines.append(
+                f"- {item['name']} (link: {placeholder}): {item['summary']}"
+            )
         file_summaries_str = "\n".join(file_summaries_lines) if file_summaries_lines else "None"
 
         # Build subdirectory summary string
         children_abstracts_str = (
-            "\n".join(f"- {item['name']}/: {item['abstract']}" for item in children_abstracts)
+            "\n".join(
+                self._child_summary_line(dir_uri, idx, item, link_map)
+                for idx, item in enumerate(children_abstracts, 1)
+            )
             if children_abstracts
             else "None"
         )
@@ -1295,7 +1323,7 @@ class SemanticProcessor(DequeueHandlerBase):
                 dir_uri,
                 file_summaries,
                 children_abstracts,
-                file_index_map,
+                link_map,
                 llm_sem=llm_sem,
                 output_language=output_language,
                 directory_coverage=directory_coverage,
@@ -1313,13 +1341,15 @@ class SemanticProcessor(DequeueHandlerBase):
             truncated_lines = []
             for idx, item in enumerate(file_summaries, 1):
                 summary = item["summary"][:per_file]
-                truncated_lines.append(f"[{idx}] {item['name']}: {summary}")
+                truncated_lines.append(
+                    f"- {item['name']} (link: viking://input_sample_f{idx}): {summary}"
+                )
             file_summaries_str = "\n".join(truncated_lines)
             overview = await self._single_generate_overview(
                 dir_uri,
                 file_summaries_str,
                 children_abstracts_str,
-                file_index_map,
+                link_map,
                 output_language=output_language,
                 directory_coverage=directory_coverage,
             )
@@ -1328,7 +1358,7 @@ class SemanticProcessor(DequeueHandlerBase):
                 dir_uri,
                 file_summaries_str,
                 children_abstracts_str,
-                file_index_map,
+                link_map,
                 output_language=output_language,
                 directory_coverage=directory_coverage,
             )
@@ -1340,7 +1370,7 @@ class SemanticProcessor(DequeueHandlerBase):
         dir_uri: str,
         file_summaries_str: str,
         children_abstracts_str: str,
-        file_index_map: Dict[int, str],
+        link_map: Dict[str, str],
         output_language: str = "en",
         directory_coverage: str = "",
     ) -> str:
@@ -1363,7 +1393,7 @@ class SemanticProcessor(DequeueHandlerBase):
             with bind_telemetry_stage("resource_summarize"):
                 overview = await vlm.get_completion_async(prompt)
 
-            overview = self._replace_index_references(overview, file_index_map)
+            overview = self._replace_link_references(overview, link_map)
 
             return overview.strip()
 
@@ -1379,7 +1409,7 @@ class SemanticProcessor(DequeueHandlerBase):
         dir_uri: str,
         file_summaries: List[Dict[str, str]],
         children_abstracts: List[Dict[str, str]],
-        file_index_map: Dict[int, str],
+        link_map: Dict[str, str],
         llm_sem: Optional[asyncio.Semaphore] = None,
         output_language: str = "en",
         directory_coverage: str = "",
@@ -1396,28 +1426,35 @@ class SemanticProcessor(DequeueHandlerBase):
         dir_name = dir_uri.split("/")[-1]
 
         work_items = [("file", index, item) for index, item in enumerate(file_summaries, 1)] + [
-            ("child", None, item) for item in children_abstracts
+            ("child", index, item) for index, item in enumerate(children_abstracts, 1)
         ]
         batches = [work_items[i : i + batch_size] for i in range(0, len(work_items), batch_size)]
         logger.info(f"Generating overview for {dir_uri} in {len(batches)} batches")
 
-        # Generate partial overviews concurrently using global file indices.
+        # Generate partial overviews concurrently using global link placeholders.
         if llm_sem is None:
             llm_sem = asyncio.Semaphore(self.max_concurrent_llm)
         partial_overviews = [None] * len(batches)
-        batch_prompts: List[Tuple[int, str, Dict[int, str]]] = []
+        batch_prompts: List[Tuple[int, str, Dict[str, str]]] = []
 
         for batch_idx, batch in enumerate(batches):
             batch_lines = []
             child_lines = []
-            batch_index_map = {}
+            batch_link_map: Dict[str, str] = {}
             for entry_kind, global_idx, item in batch:
+                assert global_idx is not None
                 if entry_kind == "file":
-                    assert global_idx is not None
-                    batch_index_map[global_idx] = item["name"]
-                    batch_lines.append(f"[{global_idx}] {item['name']}: {item['summary']}")
+                    placeholder = f"viking://input_sample_f{global_idx}"
+                    batch_link_map[placeholder] = link_map.get(
+                        placeholder, f"{dir_uri}/{item['name']}"
+                    )
+                    batch_lines.append(
+                        f"- {item['name']} (link: {placeholder}): {item['summary']}"
+                    )
                 else:
-                    child_lines.append(f"- {item['name']}/: {item['abstract']}")
+                    child_lines.append(
+                        self._child_summary_line(dir_uri, global_idx, item, batch_link_map)
+                    )
 
             prompt = render_prompt(
                 "semantic.overview_generation",
@@ -1429,14 +1466,16 @@ class SemanticProcessor(DequeueHandlerBase):
                     "directory_coverage": directory_coverage,
                 },
             )
-            batch_prompts.append((batch_idx, prompt, batch_index_map))
+            batch_prompts.append((batch_idx, prompt, batch_link_map))
 
-        async def _run_batch(batch_idx: int, prompt: str, batch_index_map: Dict[int, str]) -> None:
+        async def _run_batch(
+            batch_idx: int, prompt: str, batch_link_map: Dict[str, str]
+        ) -> None:
             try:
                 async with llm_sem:
                     with bind_telemetry_stage("resource_summarize"):
                         partial = await vlm.get_completion_async(prompt)
-                partial = self._replace_index_references(partial, batch_index_map)
+                partial = self._replace_link_references(partial, batch_link_map)
                 partial_overviews[batch_idx] = partial.strip()
             except Exception as e:
                 logger.warning(
@@ -1455,6 +1494,8 @@ class SemanticProcessor(DequeueHandlerBase):
             return partial_overviews[0]
 
         # Merge partials only; each child abstract is already represented once.
+        # Placeholders were already resolved to real URIs in each partial, so no
+        # further link substitution is needed after the merge.
         combined = "\n\n---\n\n".join(partial_overviews)
         try:
             prompt = render_prompt(
@@ -1469,7 +1510,6 @@ class SemanticProcessor(DequeueHandlerBase):
             )
             with bind_telemetry_stage("resource_summarize"):
                 overview = await vlm.get_completion_async(prompt)
-            overview = self._replace_index_references(overview, file_index_map)
             return overview.strip()
         except Exception as e:
             logger.error(

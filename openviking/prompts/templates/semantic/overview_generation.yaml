@@ -48,7 +48,12 @@ template: |
   [Files and Their Summaries in Directory]
   {{ file_summaries }}
 
-  Note: Files are numbered as [1], [2], [3], etc.
+  Note: Each entry above carries a compact link placeholder in the form
+  "(link: viking://input_sample_fN)" for files and "(link: viking://input_sample_cN)"
+  for subdirectories. When you reference an entry, write a normal Markdown link
+  using its placeholder as the URL, e.g. [display title](viking://input_sample_f1).
+  Use a natural display title (typically the entry's name); do not print the raw
+  placeholder text and do not repeat the name outside the link.
   Some entries may be code structure skeletons (showing imports, classes, functions)
   rather than prose summaries — treat them as structural descriptions of the file.
 
@@ -84,13 +89,13 @@ template: |
   4. **{{ "快速导航" if output_language == "zh-CN" else "Quick Navigation" }}** (H2): Decision Tree style
      - Guide with "What do you want to learn?" or "What do you want to do?"
      - Use → arrow to point to specific files or directories
-     - **Use file number references**: such as [1], [2], [3]
+     - **Link each entry as a Markdown link** using its placeholder, e.g. [display title](viking://input_sample_f1)
      - Concise keyword descriptions
      - When sampled, introduce the list with a note that these are representative entries and the full directory contains more
 
   5. **{{ "详细说明" if output_language == "zh-CN" else "Detailed Description" }}** (H2):
      - When sampled, begin with a one-sentence note stating that the following subsections cover only the sampled entries (X of Y), not the full directory.
-     - One H3 subsection for each file/subdirectory
+     - One H3 subsection for each file/subdirectory; the H3 heading is a Markdown link to the entry using its placeholder, e.g. ### [display title](viking://input_sample_f1)
      - Use the file summaries or subdirectory summaries provided above as description content
 
   Total length: 400-800 words
