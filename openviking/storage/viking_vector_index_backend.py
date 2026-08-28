@@ -20,6 +20,7 @@ from openviking.storage.acl import (
     acl_principals,
 )
 from openviking.storage.expr import And, Eq, FilterExpr, In, Or, PathScope, RawDSL
+from openviking.storage.vector_ids import vector_record_id
 from openviking.storage.vectordb.collection.collection import Collection
 from openviking.storage.vectordb.collection.result import UpdateResult
 from openviking.storage.vectordb.utils.logging_init import init_cpp_logging
@@ -1473,8 +1474,6 @@ class VikingVectorIndexBackend:
         new_uri: str,
         levels: Optional[List[int]] = None,
     ) -> bool:
-        import hashlib
-
         conds: List[FilterExpr] = [Eq("uri", uri), Eq("account_id", ctx.account_id)]
         if levels:
             conds.append(In("level", levels))
@@ -1507,13 +1506,6 @@ class VikingVectorIndexBackend:
             )
             return False
 
-        def _seed_uri_for_id(uri: str, level: int) -> str:
-            if level == 0:
-                return uri if uri.endswith("/.abstract.md") else f"{uri}/.abstract.md"
-            if level == 1:
-                return uri if uri.endswith("/.overview.md") else f"{uri}/.overview.md"
-            return uri
-
         updated_records: List[Dict[str, Any]] = []
         ids_to_delete: List[str] = []
         for record in full_records:
@@ -1525,9 +1517,7 @@ class VikingVectorIndexBackend:
             except (TypeError, ValueError):
                 level = 2
 
-            seed_uri = _seed_uri_for_id(new_uri, level)
-            id_seed = f"{ctx.account_id}:{seed_uri}"
-            new_id = hashlib.md5(id_seed.encode("utf-8")).hexdigest()
+            new_id = vector_record_id(ctx.account_id, new_uri, level)
 
             updated = {
                 **record,

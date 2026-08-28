@@ -27,6 +27,7 @@ from openviking.storage.errors import (
 )
 from openviking.storage.queuefs.embedding_msg import EmbeddingMsg
 from openviking.storage.queuefs.named_queue import DequeueHandlerBase
+from openviking.storage.vector_ids import vector_record_id
 from openviking.storage.viking_vector_index_backend import (
     VIKINGDB_CONTENT_MAX_SIZE,
     VikingVectorIndexBackend,
@@ -540,20 +541,6 @@ class TextEmbeddingHandler(DequeueHandlerBase):
             return cls._request_stats_by_telemetry_id.pop(telemetry_id, None)
 
     @staticmethod
-    def _seed_uri_for_id(uri: str, level: Any) -> str:
-        """Build deterministic id seed URI from canonical uri + hierarchy level."""
-        try:
-            level_int = int(level)
-        except (TypeError, ValueError):
-            level_int = 2
-
-        if level_int == 0:
-            return uri if uri.endswith("/.abstract.md") else f"{uri}/.abstract.md"
-        if level_int == 1:
-            return uri if uri.endswith("/.overview.md") else f"{uri}/.overview.md"
-        return uri
-
-    @staticmethod
     def _embedding_msg_log_context(embedding_msg: Optional[EmbeddingMsg]) -> str:
         """Return the URI allowed in embedding logs."""
         if embedding_msg is None:
@@ -835,9 +822,9 @@ class TextEmbeddingHandler(DequeueHandlerBase):
                     # Ensure vector DB has deterministic IDs per semantic layer.
                     uri = inserted_data.get("uri")
                     if uri:
-                        seed_uri = self._seed_uri_for_id(uri, inserted_data.get("level", 2))
-                        id_seed = f"{account_id}:{seed_uri}"
-                        inserted_data["id"] = hashlib.md5(id_seed.encode("utf-8")).hexdigest()
+                        inserted_data["id"] = vector_record_id(
+                            account_id, uri, inserted_data.get("level", 2)
+                        )
 
                     if self._vikingdb.uses_content_field:
                         inserted_data["content"] = await self._materialize_content(
