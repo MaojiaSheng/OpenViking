@@ -74,7 +74,7 @@ fn resolve_fields(fields: &[String], is_tree: bool) -> Vec<&'static FieldDef> {
     resolved
 }
 
-fn field_value(entry: &Value, field: &FieldDef, simple: bool) -> String {
+fn field_value(entry: &Value, field: &FieldDef) -> String {
     let obj = entry.as_object();
     match field.name {
         "name" => entry_string(obj, "name")
@@ -126,13 +126,7 @@ fn field_value(entry: &Value, field: &FieldDef, simple: bool) -> String {
             .map(|v| if v { "yes".to_string() } else { "no".to_string() })
             .unwrap_or_else(|| "-".to_string()),
         "id" => entry_string(obj, "id")
-            .map(|s| {
-                if !simple && s.len() > 12 {
-                    format!("{}..", &s[..12])
-                } else {
-                    s.to_string()
-                }
-            })
+            .map(str::to_string)
             .unwrap_or_else(|| "-".to_string()),
         "count" => obj
             .and_then(|o| o.get("count"))
@@ -316,7 +310,7 @@ fn render_simple_fields(
         let vals: Vec<String> = fields
             .iter()
             .map(|f| {
-                let mut v = field_value(entry, f, true);
+                let mut v = field_value(entry, f);
                 if f.name == "name" && is_tree {
                     let depth = tree_depth(entry);
                     let indent = TREE_INDENT.repeat(depth);
@@ -356,7 +350,7 @@ fn render_fields_table(result: &Value, fields: &[&FieldDef], is_tree: bool) {
         let mut row: Vec<String> = fields
             .iter()
             .map(|f| {
-                let mut v = field_value(entry, f, false);
+                let mut v = field_value(entry, f);
                 if f.name == "name" && is_tree {
                     let depth = tree_depth(entry);
                     let indent = TREE_INDENT.repeat(depth);
@@ -1139,6 +1133,18 @@ mod tests {
 
         assert_eq!(rendered.as_deref(), Some(expected.as_str()));
         assert!(!rendered.expect("simple fields").contains(".."));
+    }
+
+    #[test]
+    fn table_id_field_keeps_complete_record_id() {
+        let record_id = "0123456789abcdef0123456789abcdef";
+        let entry = json!({"name": "readme.md", "id": record_id, "isDir": false});
+        let id_field = super::ALL_FIELDS
+            .iter()
+            .find(|field| field.name == "id")
+            .expect("id field");
+
+        assert_eq!(super::field_value(&entry, id_field), record_id);
     }
 
     #[test]
