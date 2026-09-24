@@ -228,6 +228,8 @@ Notes:
 | `openviking_queue_errors_total` | Counter | `queue` | total error count per queue |
 | `openviking_queue_pending` | Gauge | `queue` | pending queue items |
 | `openviking_queue_in_progress` | Gauge | `queue` | in-progress queue items |
+| `openviking_queue_process_duration_seconds` | Histogram | `queue, outcome` | handler execution time after a worker dequeues a message |
+| `openviking_queue_end_to_end_duration_seconds` | Histogram | `queue, outcome` | enqueue-to-handler-completion latency, including queue wait time |
 | `openviking_executor_max_workers` | Gauge | `pool, process_role, worker` | maximum workers in the asyncio default executor |
 | `openviking_executor_threads` | Gauge | `pool, process_role, worker` | threads created by the asyncio default executor |
 | `openviking_executor_active_tasks` | Gauge | `pool, process_role, worker` | default executor tasks currently running |
@@ -243,9 +245,12 @@ Notes:
 | `openviking_lock_descendant_scans_total` | Counter | none | completed descendant scans |
 | `openviking_lock_descendant_scan_duration_seconds_total` | Counter | none | cumulative descendant scan duration |
 
+The queue duration `outcome` label is one of `success`, `failed`, `requeued`, `cancelled`, or `exception`. `failed` means the handler returned a settled failure that can be acknowledged, while `exception` means processing raised and the current message is left unacknowledged.
+
 These help answer:
 
 - Is there queue backlog?
+- Which queue is slow, and is the latency caused by waiting or processing?
 - Is there lock contention or stale locking?
 - Is the default executor near its worker limit or building a queue?
 
