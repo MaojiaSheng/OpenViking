@@ -3,12 +3,11 @@
 """Volcengine Embedder Implementation"""
 
 import time
-
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 
 import volcenginesdkarkruntime
-from openviking_cli.utils.logger import default_logger as logger
 
+from openviking.metrics.datasources import EmbeddingEventDataSource
 from openviking.models.embedder.base import (
     DenseEmbedderBase,
     EmbeddingInput,
@@ -18,15 +17,16 @@ from openviking.models.embedder.base import (
     extract_text_from_content,
     truncate_and_normalize,
 )
+from openviking.models.model_error import model_error_boundary
 from openviking.models.network import (
     create_optional_async_httpx_client,
     create_optional_sync_httpx_client,
 )
-from openviking.telemetry import get_current_telemetry
-from openviking.metrics.datasources import EmbeddingEventDataSource
 from openviking.observability.context import get_root_observability_context
-from openviking.utils.model_retry import extract_metric_error_code
+from openviking.telemetry import get_current_telemetry
 from openviking.utils.async_client_cache import LoopScopedAsyncClientCache
+from openviking.utils.model_retry import extract_metric_error_code
+from openviking_cli.utils.logger import default_logger as logger
 
 VOLCENGINE_CLIENT_REQUEST_ID_HEADER = "X-Client-Request-Id"
 VOLCENGINE_CLIENT_REQUEST_ID = "ToB-direct,OpenViking_Service,openviking-service_cn-beijing"
@@ -254,6 +254,7 @@ class VolcengineDenseEmbedder(DenseEmbedderBase):
             duration_seconds=duration_seconds,
         )
 
+    @model_error_boundary
     def embed(self, content: "EmbeddingInput", is_query: bool = False) -> EmbedResult:
         """Perform dense embedding on text or multimodal content
 
@@ -317,6 +318,7 @@ class VolcengineDenseEmbedder(DenseEmbedderBase):
             lambda: _create_async_ark(self._ark_kwargs)
         )
 
+    @model_error_boundary
     async def embed_async(self, content: "EmbeddingInput", is_query: bool = False) -> EmbedResult:
         client = self._get_async_client()
 
@@ -439,6 +441,7 @@ class VolcengineSparseEmbedder(SparseEmbedderBase):
             duration_seconds=duration_seconds,
         )
 
+    @model_error_boundary
     def embed(self, content: "EmbeddingInput", is_query: bool = False) -> EmbedResult:
         """Perform sparse embedding on text or multimodal content
 
@@ -486,6 +489,7 @@ class VolcengineSparseEmbedder(SparseEmbedderBase):
             lambda: _create_async_ark(self._ark_kwargs)
         )
 
+    @model_error_boundary
     async def embed_async(self, content: "EmbeddingInput", is_query: bool = False) -> EmbedResult:
         client = self._get_async_client()
 
@@ -619,6 +623,7 @@ class VolcengineHybridEmbedder(HybridEmbedderBase):
         """
         return False
 
+    @model_error_boundary
     def embed(self, content: "EmbeddingInput", is_query: bool = False) -> EmbedResult:
         """Perform hybrid embedding on text or multimodal content
 
@@ -671,6 +676,7 @@ class VolcengineHybridEmbedder(HybridEmbedderBase):
             lambda: _create_async_ark(self._ark_kwargs)
         )
 
+    @model_error_boundary
     async def embed_async(self, content: "EmbeddingInput", is_query: bool = False) -> EmbedResult:
         client = self._get_async_client()
 

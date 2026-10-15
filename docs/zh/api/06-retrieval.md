@@ -690,7 +690,7 @@ Agent 插件每轮注入上下文时，过去需要按类型逐个检索、再�
 | `purpose` | `chat` \| `coding` | None | 按下表的分类配额启用六域分桶采样；仅在未显式传 `quotas` 时生效 |
 | `detail` | `abstract` \| `overview` \| `full` \| object | None | 为每条结果请求同一个起始档和最高档；请求档不可用或装不进预算时仍逐档退档而不截断。省略时按类别取默认档（见下）。也可传按类别的对象，如 `{"events":"overview","preferences":"abstract"}`，未列出的类别仍取默认档。`"auto"` 是已废弃的写法，等价于省略 |
 | `dedup_turns` | int | 0 | 跨轮冷却轮数，需要 `session_id`；账本存在 `{session_uri}/.recall_log.json` |
-| `exclude_uris` | string[] | [] | 无状态去重兜底，最多 200 条，与 `dedup_turns` 取并集 |
+| `exclude_uris` | string[] | [] | 无状态去重兜底，最多 200 条，与 `dedup_turns` 取并集。目录 URI 会排除整棵子树；只想排除已返回的目录节点本身时，回传它的 `.abstract.md` 和 `.overview.md` URI；`dedup_turns` 只冷却原样返回过的 URI |
 | `peer_scope` | `actor` \| `all` | `all` | `actor` 排除其他 peer，但仍保留全局、User 自有和当前 Actor Peer 内容 |
 | `other_peer_penalty` | number \| object | 按类型默认值 | 对其他 peer 结果施加的分数折损 |
 

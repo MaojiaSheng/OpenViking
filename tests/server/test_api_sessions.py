@@ -1307,33 +1307,6 @@ async def test_commit_updates_archive_metadata_before_background_task(client: ht
     assert after_result["commit_count"] == 1
 
 
-async def test_extract_session_jsonable_regression(client: httpx.AsyncClient, service, monkeypatch):
-    """Regression: extract endpoint should serialize internal objects."""
-
-    class FakeMemory:
-        __slots__ = ("uri",)
-
-        def __init__(self, uri: str):
-            self.uri = uri
-
-        def to_dict(self):
-            return {"uri": self.uri}
-
-    async def fake_extract(_session_id: str, _ctx):
-        return [FakeMemory("viking://user/default/memories/mock.md")]
-
-    monkeypatch.setattr(service.sessions, "extract", fake_extract)
-
-    create_resp = await client.post("/api/v1/sessions", json={"user": "test"})
-    session_id = create_resp.json()["result"]["session_id"]
-
-    resp = await client.post(f"/api/v1/sessions/{session_id}/extract")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "ok"
-    assert body["result"] == [{"uri": "viking://user/default/memories/mock.md"}]
-
-
 async def test_get_session_context_endpoint_returns_trimmed_latest_archive_and_messages(
     client: httpx.AsyncClient,
     service,

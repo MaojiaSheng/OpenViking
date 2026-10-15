@@ -16,7 +16,6 @@ from openviking.storage.queuefs.semantic_executor import (
     SemanticTreeExecutor,
     SemanticTreeScheduler,
 )
-from openviking.telemetry.request_wait_tracker import RequestWaitTracker
 
 
 def test_work_timestamps_union_worker_occupancy_and_exclude_queue_time(monkeypatch):
@@ -121,8 +120,7 @@ async def test_saturated_dag_scheduler_counts_claimed_handler_time(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("method", ["wait_for_request", "wait_for_embeddings"])
-async def test_downstream_wait_remains_worker_occupied_time(monkeypatch, method):
+async def test_downstream_work_wait_remains_worker_occupied_time(monkeypatch):
     now = [0.0]
     monkeypatch.setattr(
         "openviking.service.task_work_index.time",
@@ -130,26 +128,25 @@ async def test_downstream_wait_remains_worker_occupied_time(monkeypatch, method)
     )
     index = TaskWorkIndex()
     index.init_processing("task")
-    tracker = RequestWaitTracker()
-    request = "processing-time-" + method
-    tracker.register_request(request)
-    tracker.register_embedding_root(request, "embedding")
+    metadata = QueueTaskMetadata("task", "embedding")
+    assert index.register("Embedding", metadata)
     worker = asyncio.current_task()
     assert worker is not None
     index.register_active("task", worker)
     try:
         now[0] = 3
-        waiter = asyncio.create_task(getattr(tracker, method)(request))
+        waiter = asyncio.create_task(
+            index.wait_for_work("task", ["embedding"], poll_interval=0.001)
+        )
         await asyncio.sleep(0.01)
         now[0] = 20
         assert index.processing_seconds("task") == 20
-        tracker.mark_embedding_done(request, "embedding")
+        index.record_result(metadata, "completed")
         await waiter
         now[0] = 22
         assert index.processing_seconds("task") == 22
     finally:
         index.unregister_active("task", worker)
-    tracker.cleanup(request)
 
 
 @pytest.mark.asyncio

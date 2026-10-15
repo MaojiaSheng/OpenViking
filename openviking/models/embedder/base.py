@@ -12,16 +12,14 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, TypeVar, Union
 
+from openviking.models.model_error import model_error_kind
 from openviking.telemetry import get_current_telemetry
 from openviking.utils.embedding_input import (
     resolve_embedding_max_input_tokens,
     truncate_embedding_input,
 )
 from openviking.utils.exceptions import AllCredentialsFailedError
-from openviking.utils.model_retry import (
-    OrderedCredentialSwitcher,
-    classify_api_error,
-)
+from openviking.utils.model_retry import OrderedCredentialSwitcher
 from openviking_cli.utils import get_logger
 
 T = TypeVar("T")
@@ -856,16 +854,18 @@ class FailoverEmbedder(EmbedderBase):
                 self._switcher.commit_success(idx)
                 return result
             except Exception as exc:
-                error_class = classify_api_error(exc)
-                aggregated_errors.append((credential_id, error_class, exc, idx))
+                kind = model_error_kind(exc)
 
-                if self._switcher.is_fail_fast(error_class):
+                if self._switcher.is_fail_fast(kind):
                     # Request-level failure: re-raise the original exception;
                     # trying other credentials is useless.
                     raise
+                aggregated_errors.append((credential_id, kind, exc, idx))
 
                 logger.warning(
-                    f"Credential {credential_id} failed with {error_class}, trying next credential"
+                    "Credential %s failed with %s, trying next credential",
+                    credential_id,
+                    kind.value,
                 )
 
         raise AllCredentialsFailedError(aggregated_errors)
@@ -901,16 +901,18 @@ class FailoverEmbedder(EmbedderBase):
                 self._switcher.commit_success(idx)
                 return result
             except Exception as exc:
-                error_class = classify_api_error(exc)
-                aggregated_errors.append((credential_id, error_class, exc, idx))
+                kind = model_error_kind(exc)
 
-                if self._switcher.is_fail_fast(error_class):
+                if self._switcher.is_fail_fast(kind):
                     # Request-level failure: re-raise the original exception;
                     # trying other credentials is useless.
                     raise
+                aggregated_errors.append((credential_id, kind, exc, idx))
 
                 logger.warning(
-                    f"Credential {credential_id} failed with {error_class}, trying next credential"
+                    "Credential %s failed with %s, trying next credential",
+                    credential_id,
+                    kind.value,
                 )
 
         raise AllCredentialsFailedError(aggregated_errors)

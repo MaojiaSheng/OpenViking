@@ -215,7 +215,7 @@ One storage directory serves one deployment on one host, and an embedded and a s
 Connect Studio with an OpenViking API key and open **OpenViking Gateway** in the sidebar. Upstreams and context profiles are shared by the whole account; gateway keys and request logs belong to individual users.
 
 - **No management key set**: every signed-in user can add and change the account's upstreams and context profiles.
-- **Management key set**: the Upstreams and Profiles tabs are read-only, for OpenViking admins and root too. Read-only users can still view and test upstreams (without their API keys and headers) and pick them when issuing keys for themselves. Choose **Enter gateway management key** to unlock editing; the header then shows **Editing upstreams and profiles**. Editing stays unlocked until you choose **Lock** or close the browser tab. If the management key is changed, Studio locks again on its own.
+- **Management key set**: the Upstreams and Profiles tabs are read-only, for OpenViking admins and root too. Read-only users can still view upstreams (without their API keys and headers) and pick them when issuing keys for themselves, but model tests require write access because they make billable provider requests. Choose **Enter gateway management key** to unlock editing and testing; the header then shows **Editing upstreams and profiles**. Editing stays unlocked until you choose **Lock** or close the browser tab. If the management key is changed, Studio locks again on its own.
 - **Gateway keys**: everyone can issue keys for themselves; account admins can issue keys for users in their account; root first switches account in the sidebar. See [Gateway keys](#gateway-keys).
 
 Saved upstreams and context profiles take effect at once for the keys that use them (a context profile only affects conversations that start afterwards). If no usable upstream or context profile exists yet and you cannot change them, ask whoever deployed the gateway.
@@ -279,7 +279,7 @@ All upstream settings except priority take effect at once, in ongoing conversati
 
 #### Test and delete
 
-Choose **Test** in the upstream list. The gateway asks the provider for its model list with the stored credentials and tells you whether the address answered and the key was accepted. Read-only users can run it too. The test does not check a specific model, and passing it does not mean Coding Plan use is allowed; each result is explained in [Connection tests](../api/25-gateway.md#connection-tests).
+With write access, choose **Test** in the upstream list. The gateway checks the saved connection first. Once that succeeds, select or enter a model name and run the model test. The gateway sends one small generation request with the stored credentials and reports whether the endpoint, key, model and protocol worked together. It includes OpenViking tools when the upstream allows them and leaves reasoning effort at the model default. The provider may charge for the model request. Coding Plan upstreams stay blocked from model tests until gateway use is approved. Each result is explained in [Upstream tests](../api/25-gateway.md#upstream-tests).
 
 An upstream that keys still use cannot be deleted. Revoke those keys first, or turn the upstream off instead.
 

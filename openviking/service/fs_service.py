@@ -28,6 +28,8 @@ from openviking.privacy import (
 from openviking.resource.uri_mutation_coordinator import UriMutationCoordinator
 from openviking.resource.watch_storage import is_watch_task_control_uri
 from openviking.server.identity import RequestContext
+from openviking.service.task_tracker import get_task_tracker, run_tracked_operation
+from openviking.service.task_work_index import get_enqueued_work_ids, get_task_context
 from openviking.session.memory.memory_updater import MemoryUpdater
 from openviking.session.memory.utils.content_visibility import visible_content
 from openviking.storage.abstract_overview import (
@@ -46,12 +48,12 @@ from openviking.storage.vector_ids import is_vector_record_id
 from openviking.storage.viking_fs import VikingFS
 from openviking.storage.vikingdb_manager import VikingDBManagerProxy
 from openviking.telemetry import get_current_telemetry
-from openviking.telemetry.request_wait_tracker import get_request_wait_tracker
 from openviking.utils.embedding_utils import vectorize_directory_meta
 from openviking.utils.ingest_options import IngestOptions
 from openviking.utils.path_safety import validate_safe_viking_uri_path
 from openviking.utils.tags import normalize_search_tags
 from openviking_cli.exceptions import (
+    DeadlineExceededError,
     InvalidArgumentError,
     NotFoundError,
     NotInitializedError,
@@ -462,6 +464,31 @@ class FSService:
         recursive: bool = False,
         wait: bool = False,
     ) -> Optional[Dict[str, Any]]:
+        async def execute() -> Optional[Dict[str, Any]]:
+            return await self._rm(
+                uri,
+                ctx,
+                recursive=recursive,
+                wait=wait,
+            )
+
+        result, _task_id = await run_tracked_operation(
+            "fs_rm",
+            account_id=ctx.account_id,
+            user_id=ctx.user.user_id,
+            operation=execute,
+            wait=wait,
+            resource_id=uri,
+        )
+        return result
+
+    async def _rm(
+        self,
+        uri: str,
+        ctx: RequestContext,
+        recursive: bool = False,
+        wait: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         """Remove resource."""
         viking_fs = self._ensure_initialized()
         cleanup_result: Optional[Dict[str, Any]] = None
@@ -477,13 +504,8 @@ class FSService:
             refresh_parent_uri = None
         queue_status = None
         refresh_action: Optional[FreshnessAction] = None
-        request_registered = False
-        telemetry_id = get_current_telemetry().telemetry_id
         try:
             if refresh_parent_uri:
-                if wait and telemetry_id:
-                    get_request_wait_tracker().register_request(telemetry_id)
-                    request_registered = True
                 refresh_action = await self._enqueue_delete_refresh(
                     root_uri=refresh_parent_uri,
                     deleted_uri=uri,
@@ -512,12 +534,9 @@ class FSService:
                     ctx=ctx,
                 )
             if refresh_parent_uri and wait and refresh_action is not FreshnessAction.MARK_PENDING:
-                tracker = get_request_wait_tracker()
-                await tracker.wait_for_request(telemetry_id)
-                queue_status = tracker.build_queue_status(telemetry_id)
+                queue_status = await self._wait_for_refresh()
         finally:
-            if request_registered:
-                get_request_wait_tracker().cleanup(telemetry_id)
+            pass
         if cleanup_result is not None and isinstance(result, dict):
             result["memory_cleanup"] = cleanup_result
         if refresh_parent_uri and isinstance(result, dict):
@@ -658,14 +677,7 @@ class FSService:
             changes={"deleted": [deleted_uri]},
             generation_trigger="content_delete",
         )
-        if telemetry_id:
-            get_request_wait_tracker().register_semantic_root(telemetry_id, msg.id)
-        try:
-            await semantic_queue.enqueue(msg)
-        except Exception as exc:
-            if telemetry_id:
-                get_request_wait_tracker().mark_semantic_failed(telemetry_id, msg.id, str(exc))
-            raise
+        await semantic_queue.enqueue(msg)
         return decision.action
 
     async def _enqueue_copy_refresh(
@@ -714,15 +726,29 @@ class FSService:
             generation_trigger="content_copy",
             copy_source_uri=source_uri,
         )
-        if telemetry_id:
-            get_request_wait_tracker().register_semantic_root(telemetry_id, msg.id)
-        try:
-            await semantic_queue.enqueue(msg)
-        except Exception as exc:
-            if telemetry_id:
-                get_request_wait_tracker().mark_semantic_failed(telemetry_id, msg.id, str(exc))
-            raise
+        await semantic_queue.enqueue(msg)
         return "queued"
+
+    async def _wait_for_refresh(self) -> Dict[str, Any]:
+        context = get_task_context()
+        if context is None:
+            raise RuntimeError("TaskContext is required for request-scoped queue waiting")
+        work_ids = get_enqueued_work_ids()
+        tracker = get_task_tracker()
+        try:
+            if context.work_id is None:
+                await tracker.wait_for_task_work(context.task_id, timeout=None)
+            elif work_ids:
+                await tracker.wait_for_work(
+                    context.task_id,
+                    work_ids,
+                    timeout=None,
+                )
+        except (TimeoutError, asyncio.TimeoutError) as exc:
+            raise DeadlineExceededError("queue processing", None) from exc
+        return tracker.build_queue_status(
+            context.task_id, work_ids if context.work_id is not None else None
+        )
 
     async def cp(
         self,

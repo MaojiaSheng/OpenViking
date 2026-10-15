@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from openviking.models.model_error import model_error_boundary
 from openviking.models.network import (
     create_optional_async_httpx_client,
     create_optional_sync_httpx_client,
@@ -334,6 +335,7 @@ class OpenAIVLM(VLMBase):
         content = self._extract_content_from_response(response)
         return self._clean_response(content)
 
+    @model_error_boundary
     def get_completion(
         self,
         prompt: str = "",
@@ -358,6 +360,7 @@ class OpenAIVLM(VLMBase):
 
         return _call()
 
+    @model_error_boundary
     async def get_completion_async(
         self,
         prompt: str = "",
@@ -442,6 +445,7 @@ class OpenAIVLM(VLMBase):
             }
         return {"type": "image_url", "image_url": {"url": image}}
 
+    @model_error_boundary
     def get_vision_completion(
         self,
         prompt: str = "",
@@ -469,6 +473,7 @@ class OpenAIVLM(VLMBase):
 
         return _call()
 
+    @model_error_boundary
     async def get_vision_completion_async(
         self,
         prompt: str = "",

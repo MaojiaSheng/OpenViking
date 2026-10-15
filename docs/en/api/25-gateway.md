@@ -14,8 +14,8 @@ The deployer can also set a gateway management key (see [Gateway management key]
 
 | Operation | No management key set | Management key set |
 | --- | --- | --- |
-| Read upstreams and context profiles, test upstreams | Any user in the account | Any user in the account; the management key alone also works, for any account |
-| Create, change or delete upstreams and context profiles | Any user in the account | Only requests with the correct management key |
+| Read upstreams and context profiles | Any user in the account | Any user in the account; the management key alone also works, for any account |
+| Create, change or delete upstreams and context profiles; test upstreams | Any user in the account | Only requests with the correct management key |
 | Import OpenViking's model settings | Root in an embedded deployment (including local dev) | Only requests with the correct management key, and only in an embedded deployment |
 | Issue, read and revoke gateway keys; reset saving | Users: their own keys; admins: their account; root: the selected account | Same; the management key adds no rights |
 | Read logs and the overview | Users: their own records; admins and root: the whole account | Same; always needs an OpenViking identity |
@@ -66,7 +66,7 @@ If OpenViking rejects the API key, the response is 401 `openviking_http_401`.
 | GET | `/gateway/admin/upstreams/{identifier}` | Read one upstream |
 | PUT | `/gateway/admin/upstreams/{identifier}` | Create or replace an upstream |
 | DELETE | `/gateway/admin/upstreams/{identifier}` | Delete an upstream no key uses |
-| POST | `/gateway/admin/upstreams/{identifier}/test` | Test the upstream connection |
+| POST | `/gateway/admin/upstreams/{identifier}/test` | Test the upstream connection or a model |
 | POST | `/gateway/admin/upstreams/import-vlm` | Import OpenViking's model settings |
 | GET | `/gateway/admin/policies` | List context profiles |
 | GET | `/gateway/admin/policies/{identifier}` | Read one context profile |
@@ -90,20 +90,26 @@ curl -X PUT "$SERVER_URL/gateway/admin/upstreams/openai?account_id=team" \
 
 Deleting an object that gateway keys still use returns 409 `in_use` with `key_count`. Revoke those keys first. If you only want requests to stop reaching an upstream right away, turn it off instead of deleting it.
 
-### Connection tests
+### Upstream tests
 
-`POST /gateway/admin/upstreams/{identifier}/test` asks the provider for its model list with the stored credentials, with a 10-second timeout, and returns `{ok, status, reason, url}`. `status` is left out when no response arrived. Read-only callers can run it too. Anthropic upstreams send the key in both `x-api-key` and `Authorization: Bearer`; Chat Completions and Responses upstreams send only Bearer.
+`POST /gateway/admin/upstreams/{identifier}/test` supports two modes. An empty `{}` body checks the connection with `GET /v1/models`. A `{"model":"<model-name>"}` body sends one small, non-streaming generation request with the stored credentials and headers. The model name is resolved through the upstream's aliases. Model requests use the configured Chat Completions, Responses or Anthropic Messages endpoint, including an exact endpoint URL when path appending is off. When gateway tools are allowed, they include the account's OpenViking tools filtered by the default context profile; a temporary tool-catalog failure falls back to a request without tools. The model test does not set a reasoning effort, so the model uses its default.
+
+The response includes `{ok, kind, status, reason, url}`, where `kind` is `connection` or `model`. Failed tests also include the upstream HTTP response in `response`, with `http_version`, `status`, `reason`, `headers`, `body` and an optional `truncated` flag. The body is limited to 16 KiB; `status` is left out when no response arrived. The timeout is the smaller of the configured upstream timeout and 60 seconds. Running either test requires write access; model tests make a real provider request and may incur a small charge.
+
+Anthropic tests send the key in both `x-api-key` and `Authorization: Bearer` and default `anthropic-version` to `2023-06-01` when the upstream headers do not set it. Chat Completions and Responses tests send only Bearer authentication.
 
 | Provider response | `reason` | `ok` |
 | --- | --- | --- |
+| The Coding Plan upstream has not been approved for gateway use. No request is sent. | `coding_plan_blocked` | `false` |
 | No API key to use: none is stored, or the upstream expects each client to send its own. No request is sent. | `upstream_key_missing` | `false` |
-| 2xx with a `data` array in the body | `passed` | `true` |
-| 2xx with a body that signals failure, or 401 or 403 | `upstream_key_rejected` | `false` |
-| 404 or 405: the address answers, but the provider has no model list, so the key is not verified | `models_unavailable` | `true` |
-| 429: the address answers | `rate_limited` | `true` |
-| Network error or 5xx | `upstream_unavailable` | `false` |
+| 2xx with a response matching the configured model protocol | `passed` | `true` |
+| 2xx with invalid JSON or a response that does not match the configured protocol | `invalid_response` | `false` |
+| 401 or 403 | `upstream_key_rejected` | `false` |
+| 400, 404, 405 or 422 | `model_request_rejected` | `false` |
+| 429 | `rate_limited` | `false` |
+| Network error, timeout, redirect or 5xx | `upstream_unavailable` | `false` |
 
-A passed test only shows that the address and key work. It does not show that a particular model is available, or that the upstream may be used with a Coding Plan.
+A passed connection test confirms reachability and, when `/v1/models` is available, the stored credentials. A 404 or 405 still allows a model test because some providers do not expose that endpoint. A passed model test confirms that the selected model completed this request. It does not verify other models or authorize Coding Plan use.
 
 ### Import VLM settings
 

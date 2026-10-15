@@ -5,7 +5,7 @@
 import asyncio
 import sys
 from dataclasses import replace
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from openviking.pyagfs.exceptions import (
     AGFSInvalidOperationError,
@@ -829,7 +829,14 @@ class _SnapshotMixin:
         )
         for op, uri, level in tasks:
             loop.create_task(
-                self._run_vector_rebuild(executor, op, uri, level, ctx),
+                self._run_vector_rebuild(
+                    executor,
+                    op,
+                    uri,
+                    level,
+                    ctx,
+                    file_task_owner="standalone",
+                ),
                 name=f"vikingfs-git-{op}:{uri}:{int(level)}",
             )
 
@@ -867,7 +874,14 @@ class _SnapshotMixin:
             with bind_task_context(task_id, ctx.account_id, ctx.user.user_id):
                 await asyncio.gather(
                     *[
-                        self._run_vector_rebuild(executor, op, uri, level, reindex_ctx)
+                        self._run_vector_rebuild(
+                            executor,
+                            op,
+                            uri,
+                            level,
+                            reindex_ctx,
+                            file_task_owner="current",
+                        )
                         for (op, uri, level) in tasks
                     ]
                 )
@@ -897,13 +911,27 @@ class _SnapshotMixin:
         uri: str,
         level: Any,
         ctx: RequestContext,
+        *,
+        file_task_owner: Literal["current", "standalone"],
     ) -> None:
         """Wrapper coroutine: dispatch one vector task and swallow errors."""
         try:
             if op == "reindex_marker":
                 await executor.reindex_directory_marker(dir_uri=uri, level=level, ctx=ctx)
             elif op == "reindex_file":
-                await executor.execute(uri=uri, mode="vectors_only", wait=True, ctx=ctx)
+                if file_task_owner == "current":
+                    await executor.execute_in_current_task(
+                        uri=uri,
+                        mode="vectors_only",
+                        ctx=ctx,
+                    )
+                else:
+                    await executor.execute(
+                        uri=uri,
+                        mode="vectors_only",
+                        wait=True,
+                        ctx=ctx,
+                    )
             elif op == "delete":
                 await executor.delete_uri_level(uri=uri, level=level, ctx=ctx)
             else:  # pragma: no cover - defensive

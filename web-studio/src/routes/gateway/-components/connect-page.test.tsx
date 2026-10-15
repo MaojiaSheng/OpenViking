@@ -46,6 +46,10 @@ const api = vi.hoisted(() => ({
 
 const host = vi.hoisted(() => ({ isGatewayHost: false }))
 
+vi.mock('#/hooks/use-studio-service', () => ({
+  useStudioService: () => ({ ready: true, provider: 'opensource' }),
+}))
+
 vi.mock('#/hooks/use-app-connection', () => ({
   useAppConnection: () => ({
     isGatewayHost: host.isGatewayHost,

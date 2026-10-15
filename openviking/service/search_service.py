@@ -17,6 +17,7 @@ from openviking.utils.image_search import (
     is_http_url,
     is_viking_uri,
 )
+from openviking.utils.model_retry import model_retry_scope
 from openviking_cli.exceptions import InvalidArgumentError, NotInitializedError
 from openviking_cli.retrieve import ContextType
 from openviking_cli.utils import get_logger
@@ -109,6 +110,7 @@ class SearchService:
             "image_url must be a data:image base64 URI, http(s) URL, or viking:// URI."
         )
 
+    @model_retry_scope(0)
     async def search(
         self,
         query: str,
@@ -167,6 +169,7 @@ class SearchService:
         )
         return result
 
+    @model_retry_scope(0)
     async def find(
         self,
         query: str,

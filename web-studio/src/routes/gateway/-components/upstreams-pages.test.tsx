@@ -51,6 +51,10 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 vi.mock('sonner', () => ({ toast }))
+vi.mock('#/hooks/use-studio-service', () => ({
+  useStudioService: () => ({ ready: true, provider: 'opensource' }),
+}))
+
 vi.mock('#/hooks/use-app-connection', () => ({
   useAppConnection: () => ({
     connection: {
@@ -324,17 +328,44 @@ describe('UpstreamsPage', () => {
   })
 
   it('shows the test result in the row and blocks tests without a stored key', async () => {
-    api.testUpstream.mockResolvedValue({ ok: true, status: 200 })
+    api.testUpstream.mockImplementation(
+      (_connection, _id, model: string | undefined) =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          kind: model ? 'model' : 'connection',
+          reason: 'passed',
+        }),
+    )
     renderAt('/gateway/upstreams')
     await screen.findByText('OpenAI')
 
     fireEvent.click(
       rowOf('OpenAI').getByRole('button', { name: 'upstreams.test.action' }),
     )
+    await waitFor(() =>
+      expect(api.testUpstream).toHaveBeenCalledWith(
+        expect.anything(),
+        'u1',
+      ),
+    )
+    await screen.findByText('upstreams.test.result.connected')
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'upstreams.test.dialog.run',
+      }),
+    )
+    await waitFor(() =>
+      expect(api.testUpstream).toHaveBeenCalledWith(
+        expect.anything(),
+        'u1',
+        'gpt-5',
+      ),
+    )
     expect(
-      await rowOf('OpenAI').findByText('upstreams.test.result.ok'),
-    ).toBeTruthy()
-    expect(api.testUpstream.mock.lastCall?.[1]).toBe('u1')
+      (await screen.findAllByText('upstreams.test.result.ok')).length,
+    ).toBeGreaterThanOrEqual(1)
+    fireEvent.click(screen.getByRole('button', { name: 'actions.cancel' }))
 
     for (const name of ['Claude', 'Ark']) {
       const button = rowOf(name).getByRole('button', {
@@ -343,6 +374,84 @@ describe('UpstreamsPage', () => {
       expect(button.hasAttribute('disabled')).toBe(true)
     }
   })
+
+  it('keeps model testing disabled when the connection test fails', async () => {
+    api.testUpstream.mockResolvedValue({
+      ok: false,
+      kind: 'connection',
+      reason: 'upstream_unavailable',
+    })
+    renderAt('/gateway/upstreams')
+    await screen.findByText('OpenAI')
+
+    fireEvent.click(
+      rowOf('OpenAI').getByRole('button', { name: 'upstreams.test.action' }),
+    )
+
+    await screen.findByText('upstreams.test.result.unreachable')
+    expect(
+      screen
+        .getByRole('button', { name: 'upstreams.test.dialog.run' })
+        .hasAttribute('disabled'),
+    ).toBe(true)
+    expect(api.testUpstream).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    [
+      '{"error":{"message":"Invalid API key"}}',
+      { error: { message: 'Invalid API key' } },
+    ],
+    [
+      '<html><head><title>Bad Gateway</title><style>body{color:red}</style></head><body><h1>502 Bad Gateway</h1><p>Upstream unavailable</p><script>alert(1)</script></body></html>',
+      {
+        title: 'Bad Gateway',
+        body: '502 Bad Gateway\nUpstream unavailable',
+      },
+    ],
+    ['upstream connection closed', 'upstream connection closed'],
+  ])(
+    'formats a failed upstream response for display',
+    async (body, readableBody) => {
+      const response = {
+        http_version: 'HTTP/1.1',
+        status: 401,
+        reason: 'Unauthorized',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      }
+      api.testUpstream
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          kind: 'connection',
+          reason: 'passed',
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          kind: 'model',
+          reason: 'upstream_key_rejected',
+          response,
+        })
+      renderAt('/gateway/upstreams')
+      await screen.findByText('OpenAI')
+
+      fireEvent.click(
+        rowOf('OpenAI').getByRole('button', { name: 'upstreams.test.action' }),
+      )
+      await screen.findByText('upstreams.test.result.connected')
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'upstreams.test.dialog.run',
+        }),
+      )
+
+      const label = await screen.findByText('upstreams.test.dialog.response')
+      const text = label.parentElement?.querySelector('pre')?.textContent ?? ''
+      expect(JSON.parse(text)).toEqual({ ...response, body: readableBody })
+    },
+  )
 
   it('deletes an unused upstream after confirmation', async () => {
     api.deleteUpstream.mockResolvedValue({ deleted: true })
@@ -755,17 +864,46 @@ describe('describeTest', () => {
 
   it.each([
     [{ ok: true, status: 200 }, 'success', 'upstreams.test.explain.ok'],
-    [{ ok: false, status: 401 }, 'danger', 'upstreams.test.explain.auth'],
-    [{ ok: true, status: 404 }, 'neutral', 'upstreams.test.explain.notFound'],
     [
-      { ok: true, status: 405, reason: 'models_unavailable' },
-      'neutral',
-      'upstreams.test.explain.notFound',
+      {
+        ok: true,
+        status: 200,
+        kind: 'connection' as const,
+        reason: 'passed',
+      },
+      'success',
+      'upstreams.test.explain.connected',
     ],
     [
-      { ok: true, status: 429, reason: 'rate_limited' },
+      {
+        ok: true,
+        status: 404,
+        kind: 'connection' as const,
+        reason: 'models_unavailable',
+      },
+      'neutral',
+      'upstreams.test.explain.connectionUnverified',
+    ],
+    [{ ok: false, status: 401 }, 'danger', 'upstreams.test.explain.auth'],
+    [
+      { ok: false, status: 429, reason: 'rate_limited' },
       'neutral',
       'upstreams.test.explain.rateLimited',
+    ],
+    [
+      {
+        ok: false,
+        status: 404,
+        reason: 'model_request_rejected',
+        model: 'missing',
+      },
+      'danger',
+      'upstreams.test.explain.requestRejected',
+    ],
+    [
+      { ok: false, status: 200, reason: 'invalid_response' },
+      'danger',
+      'upstreams.test.explain.invalidResponse',
     ],
     [
       { ok: false, status: 200, reason: 'upstream_key_rejected' },
@@ -818,13 +956,8 @@ describe('upstream access and import', () => {
     })
   }
 
-  it('shows read-only list details and retains connection testing', async () => {
+  it('shows read-only list details without write actions or model tests', async () => {
     readOnly()
-    api.testUpstream.mockResolvedValue({
-      ok: true,
-      status: 404,
-      reason: 'models_unavailable',
-    })
     renderAt('/gateway/upstreams')
     await screen.findByText('OpenAI')
     expect(screen.queryByText('upstreams.add')).toBeNull()
@@ -835,12 +968,11 @@ describe('upstream access and import', () => {
     expect(toggle.hasAttribute('data-disabled')).toBe(true)
     fireEvent.click(toggle)
     expect(api.saveUpstream).not.toHaveBeenCalled()
-    fireEvent.click(
-      rowOf('OpenAI').getByRole('button', { name: 'upstreams.test.action' }),
-    )
     expect(
-      await screen.findByText('upstreams.test.result.unverified'),
-    ).toBeTruthy()
+      rowOf('OpenAI').queryByRole('button', {
+        name: 'upstreams.test.action',
+      }),
+    ).toBeNull()
   })
 
   it('disables read-only editor controls, hides credentials, and tests outside the fieldset', async () => {
@@ -877,12 +1009,12 @@ describe('upstream access and import', () => {
       screen.getByLabelText<HTMLInputElement>('upstreams.form.name.label')
         .disabled,
     ).toBe(true)
-    const test = screen.getByRole('button', {
-      name: 'upstreams.test.connection',
-    })
-    expect(test.closest('fieldset')).toBeNull()
-    fireEvent.click(test)
-    await waitFor(() => expect(api.testUpstream).toHaveBeenCalledTimes(1))
+    expect(
+      screen.queryByRole('button', {
+        name: 'upstreams.test.connection',
+      }),
+    ).toBeNull()
+    expect(api.testUpstream).not.toHaveBeenCalled()
   })
 
   it('blocks the direct create URL for read-only users', async () => {

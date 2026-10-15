@@ -489,25 +489,3 @@ def test_deprecated_user_agent_evolution_config_is_not_persisted():
 
     assert config.agent_evolution.enabled is True
     assert "agent_evolution" not in config.model_dump(exclude_none=True)
-
-
-async def test_manual_extract_respects_account_setting(fake_viking_fs):
-    extract = AsyncMock(return_value=[])
-    compressor = SimpleNamespace(extract_long_term_memories=extract)
-    service = SessionService(
-        viking_fs=fake_viking_fs,
-        session_compressor=compressor,
-    )
-    runtime_config = _FakeRuntimeConfig()
-    runtime_config.values[("default", "agent_evolution")] = SimpleNamespace(enabled=True)
-    service.set_runtime_config_manager(runtime_config)
-    session = SimpleNamespace(
-        uri="viking://user/default/sessions/test-session",
-        messages=[],
-    )
-    service.get = AsyncMock(return_value=session)
-    ctx = RequestContext(user=UserIdentifier.the_default_user(), role=Role.ROOT)
-
-    await service.extract("test-session", ctx)
-
-    assert extract.await_args.kwargs["agent_evolution_enabled"] is True

@@ -316,6 +316,8 @@ Setup guides for each integration:
 
 For setup instructions and integration details, see [Integrations](https://openviking.ai/integrations).
 
+For framework applications, see the [LangChain/LangGraph and Microsoft Agent Framework packages](integrations/frameworks/README.md), with a guide to adding other adapters.
+
 ## Desktop App (Beta)
 
 The desktop app is a console for macOS and Windows x64 (beta). It configures supported local agent integrations, inspects recall and capture events in sessions, and syncs local memories and skills to OpenViking.
@@ -424,6 +426,7 @@ The OpenViking project uses different licenses for different components:
 - **Main Project**: AGPLv3 - see the [LICENSE](./LICENSE) file for details
 - **crates/ov\_cli**: Apache 2.0 - see the [LICENSE](./crates/LICENSE) for details
 - **examples**: Apache 2.0 - see the [LICENSE](./examples/LICENSE) for details. The Hermes plugin in `examples/hermes-plugin` retains its [MIT license](./examples/hermes-plugin/LICENSE).
+- **integrations/frameworks**: adapters declare AGPLv3 in their package metadata and source headers; see each package's `LICENSE`. Their runnable examples retain Apache 2.0; see each package's `examples/LICENSE`.
 - **third\_party**: Respective original licenses of third-party projects
 
 Please also note: any wholesale rewriting and subsequent re-open-sourcing of this project is prohibited; any request to translate all or a substantial portion of the project code into another coding language requires prior written authorization from Volcano Engine. For permission requests, please contact the Volcano Engine team — see [Community & Contributing](#community--contributing) for contact channels.

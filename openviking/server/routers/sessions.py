@@ -708,17 +708,6 @@ async def commit_session(
     ).model_dump(exclude_none=True)
 
 
-@router.post("/{session_id}/extract")
-async def extract_session(
-    session_id: str = Path(..., description="Session ID"),
-    _ctx: RequestContext = Depends(get_session_request_context),
-):
-    """Extract memories from a session."""
-    service = get_service()
-    result = await service.sessions.extract(session_id, _ctx)
-    return Response(status="ok", result=_to_jsonable(result))
-
-
 @router.post("/{session_id}/messages")
 async def add_message(
     request: AddMessageRequest,

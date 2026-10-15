@@ -690,7 +690,7 @@ Injecting context every turn used to mean searching per type, reading each hit b
 | `purpose` | `chat` \| `coding` | None | Enables six-domain bucket sampling with the preset quotas below. Applies only when `quotas` is not given |
 | `detail` | `abstract` \| `overview` \| `full` \| object | None | Requests one starting/maximum tier for every entry. Entries whose requested tier is unavailable or does not fit step down instead of being truncated. Omitted, each category takes its default tier (below). Also accepts a per-category object such as `{"events":"overview","preferences":"abstract"}`; categories left out keep their default. `"auto"` is a deprecated spelling and behaves as if omitted |
 | `dedup_turns` | int | 0 | Cooldown window in turns; needs `session_id`. Ledger lives at `{session_uri}/.recall_log.json` |
-| `exclude_uris` | string[] | [] | Stateless dedup fallback, up to 200 entries, unioned with `dedup_turns` |
+| `exclude_uris` | string[] | [] | Stateless dedup fallback, up to 200 entries, unioned with `dedup_turns`. A directory URI excludes its whole subtree, so echo a served directory as its `.abstract.md` and `.overview.md` URIs to exclude just that node; `dedup_turns` cools served URIs exactly |
 | `peer_scope` | `actor` \| `all` | `all` | `actor` excludes other peers while keeping global, self-owned and current-actor content |
 | `other_peer_penalty` | number \| object | per-category defaults | Score penalty applied to other-peer hits |
 

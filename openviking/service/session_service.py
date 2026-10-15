@@ -551,33 +551,6 @@ class SessionService:
         )
         return task.to_dict() if task else None
 
-    async def extract(self, session_id: str, ctx: RequestContext) -> List[Any]:
-        """Extract memories from a session.
-
-        Args:
-            session_id: Session ID to extract from
-
-        Returns:
-            List of extracted memories
-        """
-        self._ensure_initialized()
-        if not self._session_compressor:
-            raise NotInitializedError("SessionCompressorV3")
-
-        session = await self.get(session_id, ctx)
-        archive_uri = f"{session.uri}/manual_extract"
-
-        memories = await self._session_compressor.extract_long_term_memories(
-            messages=session.messages,
-            user=ctx.user,
-            session_id=session_id,
-            ctx=ctx,
-            archive_uri=archive_uri,
-            agent_evolution_enabled=await self.get_agent_evolution_enabled(ctx.account_id),
-        )
-        self._record_lifecycle_metric("extract", "ok")
-        return memories
-
     @staticmethod
     def effective_auto_commit_policy(session: Session) -> Optional[Dict[str, Any]]:
         """Return the resolved auto-commit policy (defaults filled), or None when disabled."""

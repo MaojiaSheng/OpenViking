@@ -155,6 +155,11 @@ class Upstream(BaseModel):
         return value
 
 
+class UpstreamTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model: str | None = Field(default=None, min_length=1, max_length=256)
+
+
 class KeyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str

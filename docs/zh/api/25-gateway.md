@@ -14,8 +14,8 @@
 
 | 操作 | 未设置管理密钥 | 已设置管理密钥 |
 | --- | --- | --- |
-| 读取上游和上下文配置、测试上游 | 本账号的任何用户 | 本账号的任何用户；单独持有管理密钥也可以，并能指定任意账号 |
-| 创建、修改、删除上游或上下文配置 | 本账号的任何用户 | 只有带正确管理密钥的请求 |
+| 读取上游和上下文配置 | 本账号的任何用户 | 本账号的任何用户；单独持有管理密钥也可以，并能指定任意账号 |
+| 创建、修改或删除上游和上下文配置；测试上游 | 本账号的任何用户 | 只有带正确管理密钥的请求 |
 | 导入 OpenViking 的模型配置 | 嵌入部署中的 root（包括本地 dev） | 只有带正确管理密钥的请求，且只限嵌入部署 |
 | 签发、读取、吊销网关密钥，重置保存 | user 只能操作自己的密钥；admin 操作本账号；root 操作所选账号 | 同左，管理密钥不增加任何权限 |
 | 读取日志和概览 | user 只看自己的；admin 和 root 看整个账号 | 同左，始终需要 OpenViking 身份 |
@@ -66,7 +66,7 @@ OpenViking 拒绝 API 密钥时，返回 401 `openviking_http_401`。
 | GET | `/gateway/admin/upstreams/{identifier}` | 读取单个上游 |
 | PUT | `/gateway/admin/upstreams/{identifier}` | 创建或替换上游 |
 | DELETE | `/gateway/admin/upstreams/{identifier}` | 删除没有密钥在用的上游 |
-| POST | `/gateway/admin/upstreams/{identifier}/test` | 测试上游连接 |
+| POST | `/gateway/admin/upstreams/{identifier}/test` | 测试上游连接或模型 |
 | POST | `/gateway/admin/upstreams/import-vlm` | 导入 OpenViking 的模型配置 |
 | GET | `/gateway/admin/policies` | 列出上下文配置 |
 | GET | `/gateway/admin/policies/{identifier}` | 读取单个上下文配置 |
@@ -90,20 +90,26 @@ curl -X PUT "$SERVER_URL/gateway/admin/upstreams/openai?account_id=team" \
 
 删除仍有网关密钥在用的对象，返回 409 `in_use` 和 `key_count`。先吊销这些密钥；只是想让请求立即停止发往某个上游，可以停用它而不删除。
 
-### 连接测试
+### 上游测试
 
-`POST /gateway/admin/upstreams/{identifier}/test` 用已存的凭证请求服务商的模型列表，超时 10 秒，返回 `{ok, status, reason, url}`；没有收到响应时不含 `status`。只读调用方也能使用。Anthropic 上游同时在 `x-api-key` 和 `Authorization: Bearer` 中发送密钥，Chat Completions 和 Responses 上游只发送 Bearer。
+`POST /gateway/admin/upstreams/{identifier}/test` 支持两种模式：空请求体 `{}` 通过 `GET /v1/models` 检查连接；`{"model":"<模型名>"}` 使用已存的凭证和请求头发送一次很小的非流式生成请求。模型名会先经过上游的别名映射。模型请求使用已配置的 Chat Completions、Responses 或 Anthropic Messages 接口；关闭路径拼接时，也会遵循配置的完整接口 URL。上游允许 Gateway 工具时，请求会带上当前账户的 OpenViking 工具，并按默认上下文配置筛选；工具目录暂时不可用时，降级为不带工具继续测试。模型测试不设置 reasoning effort，由模型使用默认值。
+
+响应包含 `{ok, kind, status, reason, url}`，其中 `kind` 为 `connection` 或 `model`。测试失败时还会在 `response` 中返回完整的上游 HTTP 响应，包括 `http_version`、`status`、`reason`、`headers`、`body` 和可选的 `truncated` 标记。响应体最多 16 KiB；没有收到响应时不含 `status`。超时时间取已配置上游超时与 60 秒中的较小值。两种测试都需要写权限；模型测试会真实请求服务商并可能产生少量费用。
+
+Anthropic 测试同时在 `x-api-key` 和 `Authorization: Bearer` 中发送密钥；上游请求头未设置 `anthropic-version` 时，默认使用 `2023-06-01`。Chat Completions 和 Responses 测试只发送 Bearer 鉴权。
 
 | 服务商的响应 | `reason` | `ok` |
 | --- | --- | --- |
+| Coding Plan 上游尚未授权网关使用。网关不发请求。 | `coding_plan_blocked` | `false` |
 | 没有可用的 API Key：没有保存，或者上游要求每个客户端自带。网关不发请求。 | `upstream_key_missing` | `false` |
-| 2xx，响应体带 `data` 数组 | `passed` | `true` |
-| 2xx 但响应体表示失败，或者 401、403 | `upstream_key_rejected` | `false` |
-| 404、405：地址可达，但服务商不提供模型列表，密钥没有得到验证 | `models_unavailable` | `true` |
-| 429：地址可达 | `rate_limited` | `true` |
-| 网络错误或 5xx | `upstream_unavailable` | `false` |
+| 2xx，响应符合已配置的模型协议 | `passed` | `true` |
+| 2xx，但响应不是合法 JSON 或不符合已配置的协议 | `invalid_response` | `false` |
+| 401 或 403 | `upstream_key_rejected` | `false` |
+| 400、404、405 或 422 | `model_request_rejected` | `false` |
+| 429 | `rate_limited` | `false` |
+| 网络错误、超时、重定向或 5xx | `upstream_unavailable` | `false` |
 
-测试通过只说明地址和密钥可用，不代表某个具体模型可用，也不代表上游允许使用 Coding Plan。
+连接测试通过说明地址可达；服务商提供 `/v1/models` 时也会验证已存凭证。部分服务商不提供该接口，返回 404 或 405 后仍可继续测试模型。模型测试通过说明所选模型完成了本次请求，不代表其他模型也可用，也不会授权使用 Coding Plan。
 
 ### 导入 VLM 配置
 

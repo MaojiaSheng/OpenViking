@@ -64,7 +64,6 @@ from openviking.session.working_memory import (
 )
 from openviking.storage.abstract_overview import render_abstract_overview
 from openviking.telemetry import get_current_telemetry, tracer
-from openviking.telemetry.request_wait_tracker import get_request_wait_tracker
 from openviking.utils.model_retry import is_retryable_api_error, retry_async
 from openviking.utils.time_utils import get_current_timestamp
 from openviking.utils.token_estimation import estimate_text_tokens
@@ -2048,11 +2047,11 @@ class Session:
     ) -> None:
         """Phase 2: Extract memories and enqueue semantic work in the background."""
         from openviking.service.task_tracker import get_task_tracker
+        from openviking.service.task_work_index import get_task_context
         from openviking.telemetry import OperationTelemetry, bind_telemetry
         from openviking.telemetry.registry import register_telemetry, unregister_telemetry
 
         tracker = get_task_tracker()
-        request_wait_tracker = get_request_wait_tracker()
 
         memories_extracted: Dict[str, int] = {}
         usage_events_extracted = 0
@@ -2081,7 +2080,6 @@ class Session:
                 account_id=self.ctx.account_id,
                 user_id=self.ctx.user.user_id,
             )
-            request_wait_tracker.register_request(telemetry.telemetry_id)
             register_telemetry(telemetry)
             try:
                 with bind_telemetry(telemetry):
@@ -2426,11 +2424,13 @@ class Session:
                                 )
 
                 try:
-                    await request_wait_tracker.wait_for_request(
-                        telemetry.telemetry_id,
+                    task_context = get_task_context()
+                    await tracker.wait_for_task_work(
+                        task_id,
+                        exclude_work_id=task_context.work_id if task_context else None,
                         timeout=_PHASE2_QUEUE_WAIT_TIMEOUT_SECONDS,
                     )
-                except TimeoutError as exc:
+                except (TimeoutError, asyncio.TimeoutError) as exc:
                     telemetry.set_error(
                         "session.commit.phase2.wait_for_request",
                         "DEADLINE_EXCEEDED",
@@ -2443,7 +2443,6 @@ class Session:
                         _PHASE2_QUEUE_WAIT_TIMEOUT_SECONDS,
                     )
             finally:
-                request_wait_tracker.cleanup(telemetry.telemetry_id)
                 unregister_telemetry(telemetry.telemetry_id)
 
             # Phase 2 complete — update meta with telemetry and commit info

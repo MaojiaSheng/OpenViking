@@ -7,6 +7,9 @@ import pytest
 
 import openviking.storage.content_write as content_write_module
 from openviking.server.identity import RequestContext, Role
+from openviking.service.task_store import PersistentTaskStore
+from openviking.service.task_tracker import TaskTracker
+from openviking.service.task_work_index import TaskWorkIndex, bind_task_context
 from openviking.session.memory.dataclass import MemoryFile
 from openviking.session.memory.utils import MemoryFileUtils
 from openviking.storage.content_write import ContentWriteCoordinator
@@ -15,6 +18,7 @@ from openviking.storage.context_update_plan import (
     ContextUpdatePlan,
     FileRefreshIntent,
 )
+from openviking.storage.queuefs.queue_middleware import EnqueueReceipt
 from openviking.storage.queuefs.semantic_ops.freshness_policy import FreshnessAction
 from openviking.telemetry.context import bind_telemetry
 from openviking.telemetry.operation import OperationTelemetry
@@ -25,6 +29,7 @@ from openviking_cli.exceptions import (
     OpenVikingError,
 )
 from openviking_cli.session.user_id import UserIdentifier
+from tests.test_task_tracker import _FakeAgfs
 
 
 class _PathLockClient:
@@ -119,19 +124,22 @@ def _coordinator_queue_for_unit_tests(monkeypatch, request):
         yield None
         return
 
-    queue = SimpleNamespace(enqueue=AsyncMock(return_value="queued"))
+    queue = SimpleNamespace(enqueue=AsyncMock(return_value=EnqueueReceipt("queued", "work-1")))
     queue_manager = SimpleNamespace(
         SEMANTIC="semantic",
         get_queue=lambda *args, **kwargs: queue,
     )
     monkeypatch.setattr(content_write_module, "get_queue_manager", lambda: queue_manager)
-    yield queue
+    tracker = TaskTracker(PersistentTaskStore(_FakeAgfs()))
+    tracker.attach_work_index(TaskWorkIndex())
+    monkeypatch.setattr("openviking.service.task_tracker._instance", tracker)
 
-    tracker = content_write_module.get_request_wait_tracker()
-    for call in queue.enqueue.await_args_list:
-        msg = call.args[0]
-        if msg.wait_for_request_completion:
-            tracker.mark_semantic_done(msg.telemetry_id, msg.id, processed_delta=0)
+    async def run_tracked_operation(_task_type, *, operation, **_kwargs):
+        with bind_task_context("test-task", "default", "default", enqueued_work=[]):
+            return await operation(), "test-task"
+
+    monkeypatch.setattr(content_write_module, "run_tracked_operation", run_tracked_operation)
+    yield queue
 
 
 @pytest.mark.asyncio
@@ -677,7 +685,7 @@ async def test_batch_hands_off_file_locks_after_one_aggregated_refresh(monkeypat
     locks = vfs._async_agfs
     coordinator = ContentWriteCoordinator(vfs)
     calls = []
-    queue = SimpleNamespace(enqueue=AsyncMock(return_value="queued"))
+    queue = SimpleNamespace(enqueue=AsyncMock(return_value=EnqueueReceipt("queued", "work-1")))
     queue_manager = SimpleNamespace(
         SEMANTIC="semantic",
         get_queue=lambda *args, **kwargs: queue,
@@ -709,11 +717,6 @@ async def test_batch_hands_off_file_locks_after_one_aggregated_refresh(monkeypat
     assert locks.handoffs == 1
     coordinator_msg = queue.enqueue.await_args.args[0]
     assert coordinator_msg.wait_for_request_completion is True
-    content_write_module.get_request_wait_tracker().mark_semantic_done(
-        telemetry.telemetry_id,
-        coordinator_msg.id,
-        processed_delta=0,
-    )
 
 
 @pytest.mark.asyncio

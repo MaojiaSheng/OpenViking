@@ -318,6 +318,8 @@ Codex は初回起動時に `Hooks need review` で止まるので、`Trust all 
 
 設定方法と統合の詳細は [Integrations](https://openviking.ai/integrations) を参照してください。
 
+フレームワークを使うアプリケーション向けには、[LangChain/LangGraph と Microsoft Agent Framework の統合パッケージ](../../integrations/frameworks/README.md)を参照してください。他のフレームワーク用アダプターを追加する手順も説明しています。
+
 ## デスクトップアプリ（Beta）
 
 デスクトップアプリは macOS と Windows x64 向けのコンソール（Beta）です。対応するローカルエージェントとの連携を設定し、セッションのリコールやキャプチャを確認して、ローカルのメモリとスキルを OpenViking に同期できます。
@@ -424,4 +426,5 @@ OpenViking プロジェクトは、コンポーネントごとに異なるライ
 - **メインプロジェクト**: AGPLv3 - 詳細は [LICENSE](../../LICENSE) ファイルを参照してください
 - **crates/ov\_cli**: Apache 2.0 - 詳細は [LICENSE](../../crates/LICENSE) を参照してください
 - **examples**: Apache 2.0 - 詳細は [LICENSE](../../examples/LICENSE) を参照してください。`examples/hermes-plugin` の Hermes プラグインは元の [MIT ライセンス](../../examples/hermes-plugin/LICENSE) を保持します。
+- **integrations/frameworks**: アダプターのパッケージメタデータとソースヘッダーは AGPLv3 を宣言しています。各パッケージの `LICENSE` を参照してください。実行可能なサンプルは Apache 2.0 を維持し、各パッケージの `examples/LICENSE` に記載されています。
 - **third\_party**: 各サードパーティプロジェクトの元のライセンス

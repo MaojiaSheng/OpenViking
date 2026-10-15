@@ -80,30 +80,53 @@ const upstreams = {
   },
   test: {
     action: 'Test',
-    connection: 'Test connection',
+    connection: 'Test',
     running: 'Testing…',
-    hint: 'Asks the provider for its model list with the stored key and headers. This checks the address and the key, not the models or chat requests.',
+    hint: 'Checks the upstream connection, then lets you test a model.',
     savedOnly: 'Tests the saved settings. Save first to test your changes.',
     passthrough:
       'Each client sends its own key, so there is no stored key to test with.',
     noKey: 'Add an API key first.',
+    codingPlan:
+      'This Coding Plan has not been approved for model requests through the gateway.',
     result: {
-      unverified: 'Reachable, key unverified · {{status}}',
-      ok: 'Reachable · {{status}}',
+      connected: 'Connected · {{status}}',
+      connectionUnverified: 'Connected · {{status}}',
+      ok: 'Model works · {{status}}',
       failed: 'Failed · {{status}}',
       unreachable: 'Unreachable',
       error: "Couldn't test",
     },
     explain: {
-      ok: 'The provider accepted the key and returned its model list.',
+      connected: 'The provider accepted the key and returned its model list.',
+      connectionUnverified:
+        'The address is reachable, but the provider does not offer a model list, so the key is not verified. You can still test a model.',
+      ok: 'The selected model generated a reply.',
       auth: 'The provider rejected the API key or one of the headers.',
       rateLimited:
-        'The address is reachable, but the provider is rate limiting requests. The key has not been verified.',
-      notFound:
-        'The address is reachable, but the provider does not offer a model list. The API key has not been verified.',
+        'The provider rate limited the request, so model generation did not complete.',
+      requestRejected:
+        'The provider rejected the generation request (HTTP {{status}}). Check the model name, protocol and complete endpoint URL.',
+      invalidResponse:
+        'The provider returned a success status, but its response does not match the selected protocol.',
       status: 'The provider answered with HTTP {{status}}.',
       unreachable:
-        "The gateway couldn't connect within 10 seconds. Check the base URL and the network between the gateway and the provider.",
+        "The gateway couldn't connect or the request timed out. Check the base URL and the network between the gateway and the provider.",
+    },
+    dialog: {
+      title: 'Test “{{name}}”',
+      description:
+        'Checks the saved connection first, then sends one small non-streaming request to test the selected model.',
+      connection: 'Upstream connection',
+      checkingConnection: 'Checking connection…',
+      model: 'Model',
+      modelPlaceholder: 'Enter a provider model name',
+      configuredModel:
+        'Choose a configured model or enter another provider model name.',
+      unconfiguredModel:
+        'This upstream allows any model. Enter a model name supported by the provider.',
+      response: 'Upstream response (JSON)',
+      run: 'Run test',
     },
   },
   delete: {

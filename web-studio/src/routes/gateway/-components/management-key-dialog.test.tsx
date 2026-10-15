@@ -113,3 +113,25 @@ it('tolerates browsers that reject session storage', () => {
   expect(getManagementKey('https://gateway.example.com')).toBe('')
   getter.mockRestore()
 })
+
+it('stores the submitted key even when the input changes during verification', async () => {
+  let resolveAccess!: (access: { can_write_objects: boolean }) => void
+  state.getAccess.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveAccess = resolve
+      }),
+  )
+  open()
+  const input = await screen.findByLabelText('management.label')
+  fireEvent.change(input, { target: { value: 'ovgm-submitted' } })
+  fireEvent.click(screen.getByRole('button', { name: 'management.unlock' }))
+  await waitFor(() => expect(state.getAccess).toHaveBeenCalledOnce())
+  fireEvent.change(input, { target: { value: 'ovgm-unverified-edit' } })
+  resolveAccess({ can_write_objects: true })
+  await waitFor(() =>
+    expect(getManagementKey('https://gateway.example.com')).toBe(
+      'ovgm-submitted',
+    ),
+  )
+})
