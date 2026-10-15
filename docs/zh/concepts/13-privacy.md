@@ -128,14 +128,22 @@ fs.read(uri)
 - 内容面：通过 `read` 自动恢复占位符
 - 两者解耦：内容文件负责占位符，隐私服务负责敏感值与版本
 
+PrivacySanitizer 不根据字段名猜测敏感性。当前 active Privacy 中长度不少于 6 个 Unicode 字符的字符串值会参与正文自动扫描与引用替换；更短的值仍可保存、引用和显式读取，但不会参与全文替换，以降低普通正文误命中。匹配目录按用户和本进程 revision 缓存，本进程修改会立即失效，另外设有 3600 秒缓存 TTL 以覆盖多 worker/多节点修改。
+
 常用命令：
 
 ```bash
 ov privacy categories
 ov privacy list skill
 ov privacy skill search-web
+ov privacy reference skill search-web api_key
+ov privacy resolve skill search-web api_key
+ov privacy resolve '{{ov_privacy:alice:viking://~/privacy/skill/search-web#/values/api_key}}'
 ov privacy upsert skill search-web --values-json '{"api_key":"..."}'
 ov privacy activate skill search-web 1
+ov privacy delete skill search-web api_key --yes
+ov privacy delete skill search-web --yes
+ov privacy scan --scope resources,skills,memories
 ov read viking://~/skills/search-web/SKILL.md
 ```
 

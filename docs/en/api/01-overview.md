@@ -521,12 +521,18 @@ This catalog follows the routes actually mounted by the server. Each group headi
 | PUT | `/api/v1/admin/accounts/{account_id}/groups/{group_id}/members/{user_id}` | Add a group member |
 | DELETE | `/api/v1/admin/accounts/{account_id}/groups/{group_id}/members/{user_id}` | Remove a group member |
 | GET | `/api/v1/privacy-configs` | List privacy configuration categories |
+| POST | `/api/v1/privacy-configs/scan` | Scan or repair registered values in content |
 | GET | `/api/v1/privacy-configs/{category}` | List category targets |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | Get the active configuration |
+| GET | `/api/v1/privacy-configs/{category}/{target_key}/field` | Get a field reference or explicitly reveal its value |
+| POST | `/api/v1/privacy-configs/resolve` | Explicitly reveal a field by reference or URI |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions` | List configuration versions |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions/{version}` | Get one version |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | Write and activate a new version |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}/activate` | Activate a version |
+| DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | Delete a target and every version |
+| DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | Remove the active field |
+| DELETE | `/api/v1/privacy-configs/selector` | Delete a target or field by URI/reference |
 
 ### [OpenViking Gateway Management](25-gateway.md)
 

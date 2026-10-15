@@ -19,6 +19,7 @@ from openviking.core.namespace import (
     relative_uri_path,
     uri_parts,
 )
+from openviking.privacy.sanitizer import PrivacySanitizer
 from openviking.resource.processing_mode import (
     DEFAULT_PROCESSING_MODE,
     ProcessingMode,
@@ -192,9 +193,52 @@ class _BatchRefreshOutcome:
 class ContentWriteCoordinator:
     """Write a file (create or modify) and trigger downstream maintenance."""
 
-    def __init__(self, viking_fs: VikingFS, vikingdb: Any = None):
+    def __init__(
+        self,
+        viking_fs: VikingFS,
+        vikingdb: Any = None,
+        privacy_sanitizer: PrivacySanitizer | None = None,
+    ):
         self._viking_fs = viking_fs
         self._vikingdb = vikingdb
+        self._privacy_sanitizer = privacy_sanitizer
+
+    async def _sanitize_text(
+        self,
+        content: str,
+        *,
+        uri: str,
+        ctx: RequestContext,
+    ) -> str:
+        if self._privacy_sanitizer is None:
+            return content
+        result = await self._privacy_sanitizer.sanitize(content, ctx=ctx, uri=uri)
+        if result.ambiguous_references:
+            raise InvalidArgumentError(
+                "Content contains a Privacy value mapped to multiple fields; "
+                "remove the duplicate mapping or insert the intended reference explicitly",
+                details={
+                    "uri": uri,
+                    "candidate_references": [
+                        list(candidates) for candidates in result.ambiguous_references
+                    ],
+                },
+            )
+        return result.content
+
+    async def _sanitize_batch_operations(
+        self,
+        operations: list[dict[str, Any]],
+        *,
+        ctx: RequestContext,
+    ) -> None:
+        if self._privacy_sanitizer is None:
+            return
+        for operation in operations:
+            content = operation.get("content")
+            uri = operation.get("uri")
+            if isinstance(content, str) and isinstance(uri, str):
+                operation["content"] = await self._sanitize_text(content, uri=uri, ctx=ctx)
 
     async def write(
         self,
@@ -216,6 +260,7 @@ class ContentWriteCoordinator:
         )
         self._ensure_content_write_policy(normalized_uri)
         await self._viking_fs._ensure_access(normalized_uri, ctx, action=AclAction.WRITE)
+        content = await self._sanitize_text(content, uri=normalized_uri, ctx=ctx)
         ingest_options = IngestOptions.from_search_tags(tags, mode=tag_mode)
         if acl is not None:
             ingest_options = replace(
@@ -296,6 +341,7 @@ class ContentWriteCoordinator:
         normalized_operations = await self._normalize_batch_operations(
             normalized_root, operations, ctx=ctx
         )
+        await self._sanitize_batch_operations(normalized_operations, ctx=ctx)
 
         target_paths = [
             self._viking_fs._uri_to_path(operation["uri"], ctx=ctx)

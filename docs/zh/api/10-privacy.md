@@ -22,9 +22,15 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/privacy-configs` | 列出隐私配置分类 |
+| POST | `/api/v1/privacy-configs/scan` | 扫描或修复已存储正文中的登记值 |
 | GET | `/api/v1/privacy-configs/{category}` | 列出分类下目标 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | 获取当前生效配置（meta + current） |
+| GET | `/api/v1/privacy-configs/{category}/{target_key}/field` | 获取单字段引用；显式选择时返回值 |
+| POST | `/api/v1/privacy-configs/resolve` | 按字段 reference/URI 显式读取值 |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | 写入新版本并激活 |
+| DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | 删除目标及全部版本 |
+| DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | 删除当前生效配置中的字段 |
+| DELETE | `/api/v1/privacy-configs/selector` | 按 target URI 或字段 reference/URI 删除 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions` | 列出版本号 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions/{version}` | 获取指定版本详情 |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}/activate` | 激活指定版本 |
@@ -71,6 +77,28 @@
 ---
 
 ## API 参考
+
+### scan_privacy_content()
+
+显式扫描已经持久化的文本内容。默认 dry-run，不返回命中的原值；`fix=true` 时替换无歧义命中并刷新相应内容。
+
+```text
+POST /api/v1/privacy-configs/scan
+```
+
+```json
+{
+  "scopes": ["resources", "skills", "memories"],
+  "target_uri": "",
+  "fix": false,
+  "wait": false,
+  "node_limit": 10000
+}
+```
+
+`scopes` 与 `target_uri` 二选一。重复值对应多个 Privacy 字段时报告 `ambiguous`，不会任意选取引用。
+
+---
 
 ### list_privacy_categories()
 
@@ -168,6 +196,51 @@ curl -X GET "http://localhost:1933/api/v1/privacy-configs/skill/byted-viking-sea
 
 ---
 
+### get_privacy_field()
+
+获取当前生效版本中的单个字段。默认只返回带 owner 的引用和配置状态，不返回实际值；`reveal=true` 是供立即使用场景显式读取单字段的接口。
+
+**HTTP API**
+
+```text
+GET /api/v1/privacy-configs/{category}/{target_key}/field?field={field}&reveal=false
+```
+
+默认响应：
+
+```json
+{
+  "status": "ok",
+  "result": {
+    "owner_user_id": "alice",
+    "category": "credential",
+    "target_key": "github-prod",
+    "field": "api_key",
+    "version": 1,
+    "configured": true,
+    "reference": "{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}"
+  }
+}
+```
+
+传入 `reveal=true` 时，响应额外包含该字段的 `value`。接口不会返回同一 target 的其他字段。target 或 field 不存在时返回 `NOT_FOUND`。
+
+也可以将 owner-bound reference 或字段 URI 传给统一解析接口：
+
+```text
+POST /api/v1/privacy-configs/resolve
+```
+
+```json
+{"selector":"{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}"}
+```
+
+字段 URI 支持 `viking://~/privacy/...#/values/...` 和显式 `viking://user/{user_id}/privacy/...#/values/...`。显式 owner 与当前身份不一致时返回 `PERMISSION_DENIED`。
+
+OpenViking 生成、保存和返回的 canonical reference 始终不带空格。解析器兼容 `{{` 后和 `}}` 前的空格或 Tab，例如 `{{ ov_privacy:alice:... }}`，解析后仍规范化为 `{{ov_privacy:alice:...}}`；owner、URI 和路径字段内部不允许插入空白。
+
+---
+
 ### upsert_privacy_config()
 
 写入新版本并将其设为当前生效版本。
@@ -226,6 +299,43 @@ curl -X POST "http://localhost:1933/api/v1/privacy-configs/skill/byted-viking-se
     "change_reason": "rotate key"
   }
 }
+```
+
+---
+
+### delete_privacy_config()
+
+删除一个 target 的当前值、元信息和完整版本历史。重复删除是安全的：目标不存在时返回 `deleted: false`。
+
+```text
+DELETE /api/v1/privacy-configs/{category}/{target_key}
+```
+
+```json
+{
+  "status": "ok",
+  "result": {
+    "category": "credential",
+    "target_key": "github-prod",
+    "deleted": true
+  }
+}
+```
+
+字段删除只影响当前生效配置，对外不要求指定版本。删除后仍有字段时，实现会发布一个移除该字段的新 active 快照，已有历史版本继续保留；删除最后一个字段时会直接删除整个 target，包括当前值、元信息和全部历史，并返回 `target_deleted: true`。
+
+```text
+DELETE /api/v1/privacy-configs/{category}/{target_key}/field?field={field}
+```
+
+target URI、字段 URI 和 owner-bound reference 也可以通过以下接口删除：
+
+```text
+DELETE /api/v1/privacy-configs/selector
+```
+
+```json
+{"selector":"viking://~/privacy/credential/github-prod#/values/api_key"}
 ```
 
 ---
@@ -349,6 +459,14 @@ ov privacy list skill
 ov privacy get skill byted-viking-search-knowledgebase
 ov privacy skill byted-viking-search-knowledgebase
 
+# 默认只取得 owner 绑定引用，不返回实际值
+ov privacy reference credential github-prod api_key
+
+# 显式读取当前生效版本中的一个字段
+ov privacy resolve credential github-prod api_key
+ov privacy resolve '{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}'
+ov privacy resolve 'viking://~/privacy/credential/github-prod#/values/api_key'
+
 # 更新（整包 JSON）
 ov privacy upsert skill byted-viking-search-knowledgebase \
   --values-json '{"api_key":"secret-2","base_url":"https://example.com"}'
@@ -364,6 +482,18 @@ ov privacy upsert skill byted-viking-search-knowledgebase \
 ov privacy versions skill byted-viking-search-knowledgebase
 ov privacy version skill byted-viking-search-knowledgebase 2
 ov privacy activate skill byted-viking-search-knowledgebase 2
+
+# 删除目标及全部版本；非交互环境必须显式 --yes
+ov privacy delete credential github-prod --yes
+ov privacy delete 'viking://~/privacy/credential/github-prod' --yes
+
+# 删除当前字段；历史快照仍保留
+ov privacy delete credential github-prod api_key --yes
+ov privacy delete '{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}' --yes
+
+# 存量内容扫描默认为 dry-run；--fix 才会改写
+ov privacy scan --scope resources,skills,memories
+ov privacy scan --target viking://~/resources/project-a --fix --wait
 ```
 
 ---

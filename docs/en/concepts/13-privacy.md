@@ -128,14 +128,22 @@ Current matching is suffix-based: `/skills/{name}/SKILL.md`, so it supports user
 - Content plane: `read` automatically restores placeholders
 - Separation of concerns: content files hold placeholders; privacy service holds sensitive values and versions
 
+PrivacySanitizer does not infer sensitivity from field names. String values in the active Privacy catalog participate in automatic content scanning and reference replacement only when they contain at least 6 Unicode characters. Shorter values can still be stored, referenced, and explicitly resolved, but are excluded from global substring replacement to reduce false positives in ordinary text. The matcher catalog is cached per user and process-local revision; local changes invalidate it immediately, and a 3600-second TTL bounds staleness after changes made by another worker or node.
+
 Common commands:
 
 ```bash
 ov privacy categories
 ov privacy list skill
 ov privacy skill search-web
+ov privacy reference skill search-web api_key
+ov privacy resolve skill search-web api_key
+ov privacy resolve '{{ov_privacy:alice:viking://~/privacy/skill/search-web#/values/api_key}}'
 ov privacy upsert skill search-web --values-json '{"api_key":"..."}'
 ov privacy activate skill search-web 1
+ov privacy delete skill search-web api_key --yes
+ov privacy delete skill search-web --yes
+ov privacy scan --scope resources,skills,memories
 ov read viking://~/skills/search-web/SKILL.md
 ```
 

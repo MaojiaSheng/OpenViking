@@ -3,6 +3,10 @@
 
 import httpx
 
+from openviking.privacy.reference import build_privacy_field_reference
+from openviking.server.identity import RequestContext, Role
+from openviking_cli.session.user_id import UserIdentifier
+
 
 async def test_privacy_config_api_roundtrip(client: httpx.AsyncClient):
     upsert = await client.post(
@@ -120,3 +124,305 @@ async def test_privacy_config_target_not_found(client: httpx.AsyncClient):
     activate_body = activate.json()
     assert activate_body["status"] == "error"
     assert activate_body["error"]["code"] == "NOT_FOUND"
+
+
+async def test_privacy_field_reference_is_safe_by_default_and_reveal_is_explicit(
+    client: httpx.AsyncClient,
+):
+    created = await client.post(
+        "/api/v1/privacy-configs/credential/github-prod",
+        json={"values": {"api/key": "secret-value", "region": "cn"}},
+    )
+    assert created.status_code == 200, created.text
+    owner = created.json()["result"]["created_by"]
+
+    reference_response = await client.get(
+        "/api/v1/privacy-configs/credential/github-prod/field",
+        params={"field": "api/key"},
+    )
+    assert reference_response.status_code == 200, reference_response.text
+    reference = reference_response.json()["result"]
+    assert reference == {
+        "owner_user_id": owner,
+        "category": "credential",
+        "target_key": "github-prod",
+        "field": "api/key",
+        "version": 1,
+        "configured": True,
+        "reference": (
+            f"{{{{ov_privacy:{owner}:viking://~/privacy/credential/"
+            "github-prod#/values/api%2Fkey}}"
+        ),
+    }
+    assert "value" not in reference
+
+    resolved_response = await client.get(
+        "/api/v1/privacy-configs/credential/github-prod/field",
+        params={"field": "api/key", "reveal": True},
+    )
+    assert resolved_response.status_code == 200, resolved_response.text
+    resolved = resolved_response.json()["result"]
+    assert resolved["reference"] == reference["reference"]
+    assert resolved["value"] == "secret-value"
+
+    missing_response = await client.get(
+        "/api/v1/privacy-configs/credential/github-prod/field",
+        params={"field": "missing"},
+    )
+    assert missing_response.status_code == 404
+    assert missing_response.json()["error"]["code"] == "NOT_FOUND"
+
+
+async def test_privacy_config_delete_is_idempotent_and_removes_history(
+    client: httpx.AsyncClient,
+):
+    for value in ("secret-v1", "secret-v2"):
+        created = await client.post(
+            "/api/v1/privacy-configs/credential/delete-me",
+            json={"values": {"api_key": value}},
+        )
+        assert created.status_code == 200, created.text
+
+    deleted_response = await client.delete(
+        "/api/v1/privacy-configs/credential/delete-me"
+    )
+    assert deleted_response.status_code == 200, deleted_response.text
+    assert deleted_response.json()["result"] == {
+        "category": "credential",
+        "target_key": "delete-me",
+        "deleted": True,
+    }
+
+    get_response = await client.get("/api/v1/privacy-configs/credential/delete-me")
+    assert get_response.status_code == 404
+
+    deleted_again = await client.delete(
+        "/api/v1/privacy-configs/credential/delete-me"
+    )
+    assert deleted_again.status_code == 200, deleted_again.text
+    assert deleted_again.json()["result"]["deleted"] is False
+
+
+async def test_privacy_scan_is_dry_run_by_default_and_fix_rewrites_content(
+    client: httpx.AsyncClient,
+    service,
+):
+    secret = "legacy-value-to-repair"
+    created = await client.post(
+        "/api/v1/privacy-configs/credential/legacy-service",
+        json={"values": {"custom_field": secret}},
+    )
+    assert created.status_code == 200, created.text
+    owner = created.json()["result"]["created_by"]
+    uri = f"viking://user/{owner}/legacy-privacy-content.md"
+    ctx = RequestContext(
+        user=UserIdentifier(service.user.account_id, owner),
+        role=Role.USER,
+    )
+    raw_path = service.viking_fs._uri_to_path(uri, ctx=ctx)
+    await service.viking_fs._async_agfs.write(
+        raw_path,
+        f"before {secret} after".encode("utf-8"),
+    )
+
+    dry_run = await client.post(
+        "/api/v1/privacy-configs/scan",
+        json={"target_uri": uri},
+    )
+    assert dry_run.status_code == 200, dry_run.text
+    report = dry_run.json()["result"]
+    assert report["dry_run"] is True
+    assert report["matched_files"] == 1
+    assert report["repaired_files"] == 0
+    assert report["matches"][0]["uri"] == uri
+    assert secret not in str(report)
+    assert secret in await service.viking_fs.read_file(uri, ctx=ctx)
+
+    fixed = await client.post(
+        "/api/v1/privacy-configs/scan",
+        json={"target_uri": uri, "fix": True},
+    )
+    assert fixed.status_code == 200, fixed.text
+    fixed_report = fixed.json()["result"]
+    assert fixed_report["repaired_files"] == 1
+    stored = await service.viking_fs.read_file(uri, ctx=ctx)
+    assert secret not in stored
+    assert build_privacy_field_reference(
+        owner, "credential", "legacy-service", "custom_field"
+    ) in stored
+
+
+async def test_privacy_scan_fix_repairs_skill_and_reindexes_package(
+    client: httpx.AsyncClient,
+    service,
+):
+    secret = "legacy-skill-registered-value"
+    created = await client.post(
+        "/api/v1/privacy-configs/credential/legacy-skill-service",
+        json={"values": {"custom": secret}},
+    )
+    assert created.status_code == 200, created.text
+    owner = created.json()["result"]["created_by"]
+    skill_md = """---
+name: privacy-scan-skill
+description: Privacy scan fixture
+---
+
+# Instructions
+
+Use no credentials yet.
+"""
+    added = await client.post(
+        "/api/v1/skills",
+        json={"data": skill_md, "wait": True},
+    )
+    assert added.status_code == 200, added.text
+    skill_uri = f"{added.json()['result']['root_uri']}/SKILL.md"
+    ctx = RequestContext(
+        user=UserIdentifier(service.user.account_id, owner),
+        role=Role.USER,
+    )
+    raw_path = service.viking_fs._uri_to_path(skill_uri, ctx=ctx)
+    await service.viking_fs._async_agfs.write(
+        raw_path,
+        skill_md.replace("Use no credentials yet.", f"credential={secret}").encode("utf-8"),
+    )
+
+    fixed = await client.post(
+        "/api/v1/privacy-configs/scan",
+        json={"target_uri": skill_uri, "fix": True, "wait": True},
+    )
+    assert fixed.status_code == 200, fixed.text
+    report = fixed.json()["result"]
+    assert report["repaired_files"] == 1
+    assert report["reindex"]
+    stored = await service.viking_fs.read_file(skill_uri, ctx=ctx)
+    assert secret not in stored
+    assert build_privacy_field_reference(
+        owner,
+        "credential",
+        "legacy-skill-service",
+        "custom",
+    ) in stored
+
+
+async def test_privacy_resolve_accepts_reference_and_field_uri_and_checks_owner(
+    client: httpx.AsyncClient,
+):
+    created = await client.post(
+        "/api/v1/privacy-configs/credential/selector-service",
+        json={"values": {"api/key": "selector-secret"}},
+    )
+    assert created.status_code == 200, created.text
+    owner = created.json()["result"]["created_by"]
+    reference = build_privacy_field_reference(
+        owner, "credential", "selector-service", "api/key"
+    )
+
+    for selector in (
+        reference,
+        reference.replace("{{ov_privacy:", "{{ ov_privacy:").replace("}}", " }}"),
+        "viking://~/privacy/credential/selector-service#/values/api%2Fkey",
+        f"viking://user/{owner}/privacy/credential/selector-service#/values/api%2Fkey",
+    ):
+        resolved = await client.post(
+            "/api/v1/privacy-configs/resolve",
+            json={"selector": selector},
+        )
+        assert resolved.status_code == 200, resolved.text
+        result = resolved.json()["result"]
+        assert result["value"] == "selector-secret"
+        assert result["reference"] == reference
+
+    spaced_reference = reference.replace("{{ov_privacy:", "{{ ov_privacy:").replace(
+        "}}", " }}"
+    )
+    normalized_delete = await client.request(
+        "DELETE",
+        "/api/v1/privacy-configs/selector",
+        json={"selector": spaced_reference.replace("api%2Fkey", "missing")},
+    )
+    assert normalized_delete.status_code == 404
+
+    foreign = reference.replace(f"ov_privacy:{owner}:", "ov_privacy:other-user:")
+    denied = await client.post(
+        "/api/v1/privacy-configs/resolve",
+        json={"selector": foreign},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "PERMISSION_DENIED"
+
+
+async def test_privacy_field_delete_publishes_new_active_snapshot_and_keeps_history(
+    client: httpx.AsyncClient,
+):
+    created = await client.post(
+        "/api/v1/privacy-configs/credential/delete-field-service",
+        json={"values": {"api_key": "secret", "region": "cn"}},
+    )
+    assert created.status_code == 200, created.text
+    owner = created.json()["result"]["created_by"]
+
+    deleted = await client.delete(
+        "/api/v1/privacy-configs/credential/delete-field-service/field",
+        params={"field": "api_key"},
+    )
+    assert deleted.status_code == 200, deleted.text
+    result = deleted.json()["result"]
+    assert result["scope"] == "field"
+    assert result["target_deleted"] is False
+    assert result["active_version"] == 2
+
+    current = (
+        await client.get("/api/v1/privacy-configs/credential/delete-field-service")
+    ).json()["result"]["current"]
+    assert current["values"] == {"region": "cn"}
+    old = (
+        await client.get(
+            "/api/v1/privacy-configs/credential/delete-field-service/versions/1"
+        )
+    ).json()["result"]
+    assert old["values"]["api_key"] == "secret"
+
+    region_reference = build_privacy_field_reference(
+        owner, "credential", "delete-field-service", "region"
+    )
+    deleted_last = await client.request(
+        "DELETE",
+        "/api/v1/privacy-configs/selector",
+        json={"selector": region_reference},
+    )
+    assert deleted_last.status_code == 200, deleted_last.text
+    last_result = deleted_last.json()["result"]
+    assert last_result["target_deleted"] is True
+    assert last_result["active_version"] is None
+    missing_target = await client.get(
+        "/api/v1/privacy-configs/credential/delete-field-service"
+    )
+    assert missing_target.status_code == 404
+    missing_history = await client.get(
+        "/api/v1/privacy-configs/credential/delete-field-service/versions/1"
+    )
+    assert missing_history.status_code == 404
+
+    missing = await client.request(
+        "DELETE",
+        "/api/v1/privacy-configs/selector",
+        json={"selector": region_reference},
+    )
+    assert missing.status_code == 404
+
+
+async def test_privacy_delete_selector_accepts_target_uri(client: httpx.AsyncClient):
+    created = await client.post(
+        "/api/v1/privacy-configs/credential/delete-target-uri",
+        json={"values": {"key": "value"}},
+    )
+    assert created.status_code == 200, created.text
+    deleted = await client.request(
+        "DELETE",
+        "/api/v1/privacy-configs/selector",
+        json={"selector": "viking://~/privacy/credential/delete-target-uri"},
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["result"]["scope"] == "target"

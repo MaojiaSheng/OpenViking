@@ -516,12 +516,18 @@ JSON 输出 - 错误：
 | PUT | `/api/v1/admin/accounts/{account_id}/groups/{group_id}/members/{user_id}` | 添加用户组成员 |
 | DELETE | `/api/v1/admin/accounts/{account_id}/groups/{group_id}/members/{user_id}` | 移除用户组成员 |
 | GET | `/api/v1/privacy-configs` | 列出隐私配置分类 |
+| POST | `/api/v1/privacy-configs/scan` | 扫描或修复正文中的登记值 |
 | GET | `/api/v1/privacy-configs/{category}` | 列出分类目标 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | 获取生效配置 |
+| GET | `/api/v1/privacy-configs/{category}/{target_key}/field` | 获取单字段引用或显式读取值 |
+| POST | `/api/v1/privacy-configs/resolve` | 按字段 reference/URI 显式读取值 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions` | 列出配置版本 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions/{version}` | 获取指定版本 |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | 写入并激活新版本 |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}/activate` | 激活指定版本 |
+| DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | 删除目标及全部版本 |
+| DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | 删除当前字段 |
+| DELETE | `/api/v1/privacy-configs/selector` | 按 URI/reference 删除目标或字段 |
 
 ### [OpenViking 网关管理](25-gateway.md)
 

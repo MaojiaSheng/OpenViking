@@ -12,7 +12,7 @@ import os
 from typing import TYPE_CHECKING, Any, Optional
 
 from openviking.core.directories import DirectoryInitializer
-from openviking.privacy import UserPrivacyConfigService
+from openviking.privacy import PrivacySanitizer, UserPrivacyConfigService
 from openviking.resource.uri_mutation_coordinator import UriMutationCoordinator
 from openviking.resource.watch_scheduler import WatchScheduler
 from openviking.server.identity import RequestContext, Role
@@ -519,6 +519,9 @@ class OpenVikingService:
             user_count,
         )
         self._privacy_config_service = UserPrivacyConfigService(self._viking_fs)
+        privacy_sanitizer = PrivacySanitizer(self._privacy_config_service)
+        self._viking_fs.set_privacy_sanitizer(privacy_sanitizer)
+        self._resource_processor.set_privacy_sanitizer(privacy_sanitizer)
 
         # Initialize processors
         self._skill_processor = SkillProcessor(

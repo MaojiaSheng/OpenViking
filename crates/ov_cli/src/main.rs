@@ -1162,7 +1162,7 @@ enum Commands {
     /// [Data] Privacy config management commands
     Privacy {
         #[command(subcommand)]
-        action: PrivacyCommands,
+        action: Box<PrivacyCommands>,
     },
     /// [Data] Export context as .ovpack
     Export {
@@ -1958,6 +1958,30 @@ enum PrivacyCommands {
         #[arg(value_name = "target-key")]
         target_key: String,
     },
+    /// Show an owner-bound reference for one active field without revealing its value
+    Reference {
+        /// Privacy config category
+        #[arg(value_name = "category")]
+        category: String,
+        /// Privacy config target key
+        #[arg(value_name = "target-key")]
+        target_key: String,
+        /// Field in the current values object
+        #[arg(value_name = "field")]
+        field: String,
+    },
+    /// Reveal one active field value for immediate use
+    Resolve {
+        /// Owner-bound reference, field URI, or privacy category
+        #[arg(value_name = "reference-or-uri-or-category")]
+        selector_or_category: String,
+        /// Privacy config target key (category form only)
+        #[arg(value_name = "target-key")]
+        target_key: Option<String>,
+        /// Field in current values (category form only)
+        #[arg(value_name = "field")]
+        field: Option<String>,
+    },
     /// Upsert privacy config values
     Upsert {
         /// Privacy config category
@@ -2018,6 +2042,39 @@ enum PrivacyCommands {
         /// Version number
         #[arg(value_name = "version")]
         version: i32,
+    },
+    /// Delete a target or make one active field unavailable
+    Delete {
+        /// Privacy reference, URI, or config category
+        #[arg(value_name = "reference-or-uri-or-category")]
+        selector_or_category: String,
+        /// Privacy config target key (category form only)
+        #[arg(value_name = "target-key")]
+        target_key: Option<String>,
+        /// Field to remove from active values (optional)
+        #[arg(value_name = "field")]
+        field: Option<String>,
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Scan persisted content for registered Privacy values
+    Scan {
+        /// Comma-separated scopes: resources,skills,memories
+        #[arg(long = "scope", value_delimiter = ',', value_name = "scope")]
+        scopes: Vec<String>,
+        /// Scan one exact viking:// file or directory instead of default scopes
+        #[arg(long, conflicts_with = "scopes", value_name = "uri")]
+        target: Option<String>,
+        /// Rewrite unambiguous matches and refresh derived indexes
+        #[arg(long)]
+        fix: bool,
+        /// Wait for refresh/reindex work after fixing
+        #[arg(long)]
+        wait: bool,
+        /// Maximum files/nodes enumerated per root
+        #[arg(long, default_value_t = 10000)]
+        node_limit: usize,
     },
 }
 
@@ -2804,7 +2861,17 @@ fn is_session_subcommand(token: &str) -> bool {
 fn is_privacy_subcommand(token: &str) -> bool {
     matches!(
         token,
-        "categories" | "list" | "get" | "upsert" | "versions" | "version" | "activate"
+        "categories"
+            | "list"
+            | "get"
+            | "reference"
+            | "resolve"
+            | "upsert"
+            | "versions"
+            | "version"
+            | "activate"
+            | "delete"
+            | "scan"
     )
 }
 
@@ -3595,7 +3662,7 @@ async fn main() {
         Commands::Observer { action } => handlers::handle_observer(action, ctx).await,
         Commands::Session { action } => handlers::handle_session(action, ctx).await,
         Commands::Admin { action } => handlers::handle_admin(action, ctx).await,
-        Commands::Privacy { action } => handlers::handle_privacy(action, ctx).await,
+        Commands::Privacy { action } => handlers::handle_privacy(*action, ctx).await,
         Commands::Ls {
             uri,
             simple,
@@ -4652,10 +4719,14 @@ mod tests {
             &["ov", "privacy", "categories"],
             &["ov", "privacy", "list"],
             &["ov", "privacy", "get"],
+            &["ov", "privacy", "reference"],
+            &["ov", "privacy", "resolve"],
             &["ov", "privacy", "upsert"],
             &["ov", "privacy", "versions"],
             &["ov", "privacy", "version"],
             &["ov", "privacy", "activate"],
+            &["ov", "privacy", "delete"],
+            &["ov", "privacy", "scan"],
             &["ov", "observer", "queue"],
             &["ov", "observer", "vikingdb"],
             &["ov", "observer", "models"],
@@ -5971,95 +6042,257 @@ mod tests {
         );
     }
 
+    fn on_cli_parser_stack(test: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(test)
+            .expect("spawn CLI parser test")
+            .join()
+            .expect("CLI parser test thread");
+    }
+
     #[test]
     fn cli_parses_privacy_upsert_with_key_dynamic_flag() {
-        let cli = Cli::parse_from(preprocess_privacy_args(vec![
-            OsString::from("ov"),
-            OsString::from("privacy"),
-            OsString::from("upsert"),
-            OsString::from("skill"),
-            OsString::from("demo"),
-            OsString::from("--key-api_key"),
-            OsString::from("secret-v2"),
-        ]));
+        on_cli_parser_stack(|| {
+            let cli = Cli::parse_from(preprocess_privacy_args(vec![
+                OsString::from("ov"),
+                OsString::from("privacy"),
+                OsString::from("upsert"),
+                OsString::from("skill"),
+                OsString::from("demo"),
+                OsString::from("--key-api_key"),
+                OsString::from("secret-v2"),
+            ]));
 
-        match cli.command {
-            Commands::Privacy { action } => match action {
-                PrivacyCommands::Upsert {
-                    category,
-                    target_key,
-                    key,
-                    ..
-                } => {
-                    assert_eq!(category, "skill");
-                    assert_eq!(target_key, "demo");
-                    assert_eq!(key, vec!["api_key=secret-v2"]);
+            match cli.command {
+                Commands::Privacy { action } => match *action {
+                    PrivacyCommands::Upsert {
+                        category,
+                        target_key,
+                        key,
+                        ..
+                    } => {
+                        assert_eq!(category, "skill");
+                        assert_eq!(target_key, "demo");
+                        assert_eq!(key, vec!["api_key=secret-v2"]);
+                    }
+                    _ => panic!("expected privacy upsert"),
+                },
+                _ => panic!("expected privacy command"),
+            }
+        });
+    }
+
+    #[test]
+    fn cli_parses_privacy_reference_resolve_and_delete() {
+        on_cli_parser_stack(|| {
+            for (subcommand, expected_field) in [("reference", "api_key"), ("resolve", "token")] {
+                let cli = Cli::parse_from(preprocess_privacy_args(vec![
+                    OsString::from("ov"),
+                    OsString::from("privacy"),
+                    OsString::from(subcommand),
+                    OsString::from("credential"),
+                    OsString::from("github-prod"),
+                    OsString::from(expected_field),
+                ]));
+
+                match cli.command {
+                    Commands::Privacy { action } => match *action {
+                        PrivacyCommands::Reference {
+                            category,
+                            target_key,
+                            field,
+                        } => {
+                            assert_eq!(subcommand, "reference");
+                            assert_eq!(category, "credential");
+                            assert_eq!(target_key, "github-prod");
+                            assert_eq!(field, expected_field);
+                        }
+                        PrivacyCommands::Resolve {
+                            selector_or_category,
+                            target_key,
+                            field,
+                        } => {
+                            assert_eq!(subcommand, "resolve");
+                            assert_eq!(selector_or_category, "credential");
+                            assert_eq!(target_key.as_deref(), Some("github-prod"));
+                            assert_eq!(field.as_deref(), Some(expected_field));
+                        }
+                        _ => panic!("expected privacy field command"),
+                    },
+                    _ => panic!("expected privacy command"),
                 }
-                _ => panic!("expected privacy upsert"),
-            },
-            _ => panic!("expected privacy command"),
-        }
+            }
+
+            let scan = Cli::parse_from(preprocess_privacy_args(vec![
+                OsString::from("ov"),
+                OsString::from("privacy"),
+                OsString::from("scan"),
+                OsString::from("--scope"),
+                OsString::from("resources,memories"),
+                OsString::from("--fix"),
+                OsString::from("--wait"),
+            ]));
+            match scan.command {
+                Commands::Privacy { action } => match *action {
+                    PrivacyCommands::Scan {
+                        scopes,
+                        target,
+                        fix,
+                        wait,
+                        node_limit,
+                    } => {
+                        assert_eq!(scopes, vec!["resources", "memories"]);
+                        assert!(target.is_none());
+                        assert!(fix && wait);
+                        assert_eq!(node_limit, 10000);
+                    }
+                    _ => panic!("expected privacy scan"),
+                },
+                _ => panic!("expected privacy command"),
+            }
+
+            let reference =
+                "{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}";
+            let resolved = Cli::parse_from(preprocess_privacy_args(vec![
+                OsString::from("ov"),
+                OsString::from("privacy"),
+                OsString::from("resolve"),
+                OsString::from(reference),
+            ]));
+            match resolved.command {
+                Commands::Privacy { action } => match *action {
+                    PrivacyCommands::Resolve {
+                        selector_or_category,
+                        target_key,
+                        field,
+                    } => {
+                        assert_eq!(selector_or_category, reference);
+                        assert!(target_key.is_none() && field.is_none());
+                    }
+                    _ => panic!("expected privacy resolve"),
+                },
+                _ => panic!("expected privacy command"),
+            }
+
+            let cli = Cli::parse_from(preprocess_privacy_args(vec![
+                OsString::from("ov"),
+                OsString::from("privacy"),
+                OsString::from("delete"),
+                OsString::from("credential"),
+                OsString::from("github-prod"),
+                OsString::from("--yes"),
+            ]));
+            match cli.command {
+                Commands::Privacy { action } => match *action {
+                    PrivacyCommands::Delete {
+                        selector_or_category,
+                        target_key,
+                        field,
+                        yes,
+                    } => {
+                        assert_eq!(selector_or_category, "credential");
+                        assert_eq!(target_key.as_deref(), Some("github-prod"));
+                        assert!(field.is_none());
+                        assert!(yes);
+                    }
+                    _ => panic!("expected privacy delete"),
+                },
+                _ => panic!("expected privacy command"),
+            }
+
+            let field_delete = Cli::parse_from(preprocess_privacy_args(vec![
+                OsString::from("ov"),
+                OsString::from("privacy"),
+                OsString::from("delete"),
+                OsString::from("credential"),
+                OsString::from("github-prod"),
+                OsString::from("api_key"),
+                OsString::from("--yes"),
+            ]));
+            match field_delete.command {
+                Commands::Privacy { action } => match *action {
+                    PrivacyCommands::Delete {
+                        selector_or_category,
+                        target_key,
+                        field,
+                        yes,
+                    } => {
+                        assert_eq!(selector_or_category, "credential");
+                        assert_eq!(target_key.as_deref(), Some("github-prod"));
+                        assert_eq!(field.as_deref(), Some("api_key"));
+                        assert!(yes);
+                    }
+                    _ => panic!("expected privacy field delete"),
+                },
+                _ => panic!("expected privacy command"),
+            }
+        });
     }
 
     #[test]
     fn cli_parses_privacy_shortcut_as_get() {
-        let cli = Cli::parse_from(preprocess_privacy_args(vec![
-            OsString::from("ov"),
-            OsString::from("privacy"),
-            OsString::from("skill"),
-            OsString::from("demo"),
-        ]));
+        on_cli_parser_stack(|| {
+            let cli = Cli::parse_from(preprocess_privacy_args(vec![
+                OsString::from("ov"),
+                OsString::from("privacy"),
+                OsString::from("skill"),
+                OsString::from("demo"),
+            ]));
 
-        match cli.command {
-            Commands::Privacy { action } => match action {
-                PrivacyCommands::Get {
-                    category,
-                    target_key,
-                } => {
-                    assert_eq!(category, "skill");
-                    assert_eq!(target_key, "demo");
-                }
-                _ => panic!("expected privacy get"),
-            },
-            _ => panic!("expected privacy command"),
-        }
+            match cli.command {
+                Commands::Privacy { action } => match *action {
+                    PrivacyCommands::Get {
+                        category,
+                        target_key,
+                    } => {
+                        assert_eq!(category, "skill");
+                        assert_eq!(target_key, "demo");
+                    }
+                    _ => panic!("expected privacy get"),
+                },
+                _ => panic!("expected privacy command"),
+            }
+        });
     }
 
     #[test]
     fn cli_parses_privacy_shortcut_after_compact_without_value() {
-        let cli = Cli::try_parse_from(preprocess_cli_args(vec![
-            OsString::from("ov"),
-            OsString::from("--compact"),
-            OsString::from("privacy"),
-            OsString::from("skill"),
-            OsString::from("demo"),
-        ]))
-        .expect("--compact without a value should not consume the privacy command");
+        on_cli_parser_stack(|| {
+            let cli = Cli::try_parse_from(preprocess_cli_args(vec![
+                OsString::from("ov"),
+                OsString::from("--compact"),
+                OsString::from("privacy"),
+                OsString::from("skill"),
+                OsString::from("demo"),
+            ]))
+            .expect("--compact without a value should not consume the privacy command");
 
-        assert!(cli.compact);
-        match cli.command {
-            Commands::Privacy { action } => match action {
-                PrivacyCommands::Get {
-                    category,
-                    target_key,
-                } => {
-                    assert_eq!(category, "skill");
-                    assert_eq!(target_key, "demo");
-                }
-                _ => panic!("expected privacy get"),
-            },
-            _ => panic!("expected privacy command"),
-        }
+            assert!(cli.compact);
+            match cli.command {
+                Commands::Privacy { action } => match *action {
+                    PrivacyCommands::Get {
+                        category,
+                        target_key,
+                    } => {
+                        assert_eq!(category, "skill");
+                        assert_eq!(target_key, "demo");
+                    }
+                    _ => panic!("expected privacy get"),
+                },
+                _ => panic!("expected privacy command"),
+            }
 
-        let explicit_false = Cli::try_parse_from(preprocess_cli_args(vec![
-            OsString::from("ov"),
-            OsString::from("-c"),
-            OsString::from("false"),
-            OsString::from("privacy"),
-            OsString::from("skill"),
-            OsString::from("demo"),
-        ]))
-        .expect("-c false should keep its explicit bool value");
-        assert!(!explicit_false.compact);
+            let explicit_false = Cli::try_parse_from(preprocess_cli_args(vec![
+                OsString::from("ov"),
+                OsString::from("-c"),
+                OsString::from("false"),
+                OsString::from("privacy"),
+                OsString::from("skill"),
+                OsString::from("demo"),
+            ]))
+            .expect("-c false should keep its explicit bool value");
+            assert!(!explicit_false.compact);
+        });
     }
 }

@@ -22,6 +22,7 @@ from openviking.core.mcp_converter import is_mcp_format, mcp_to_skill
 from openviking.core.namespace import canonical_user_root
 from openviking.core.skill_loader import SkillLoader
 from openviking.privacy import (
+    PrivacySanitizer,
     UserPrivacyConfigService,
     extract_skill_privacy_values,
 )
@@ -112,6 +113,11 @@ class SkillProcessor:
             )
         self.vikingdb = vikingdb
         self._privacy_config_service = privacy_config_service
+        self._privacy_sanitizer = (
+            PrivacySanitizer(privacy_config_service)
+            if isinstance(privacy_config_service, UserPrivacyConfigService)
+            else None
+        )
         self._vlm_resolver = vlm_resolver
 
     async def process_skill(
@@ -485,6 +491,19 @@ class SkillProcessor:
             return skill_dict, {}
 
         content = skill_dict.get("content", "")
+        sanitized_by_catalog = await self._sanitize_registered_privacy(
+            content,
+            ctx=ctx,
+            uri=(
+                f"{canonical_user_root(ctx)}/skills/"
+                f"{skill_dict.get('name', '')}/SKILL.md"
+            ),
+        )
+        prepared_skill = skill_dict
+        if sanitized_by_catalog != content:
+            prepared_skill = deepcopy(skill_dict)
+            prepared_skill["content"] = sanitized_by_catalog
+        content = sanitized_by_catalog
         extraction_kwargs = {
             "skill_name": skill_dict.get("name", ""),
             "skill_description": skill_dict.get("description", ""),
@@ -497,11 +516,34 @@ class SkillProcessor:
         extraction_kwargs["vlm"] = await self._vlm_resolver.get_vlm(ctx.account_id)
         extraction_result = await extract_skill_privacy_values(**extraction_kwargs)
         if not extraction_result.values:
-            return skill_dict, {}
+            return prepared_skill, {}
 
-        sanitized = deepcopy(skill_dict)
+        sanitized = deepcopy(prepared_skill)
         sanitized["content"] = extraction_result.sanitized_content
         return sanitized, extraction_result.values
+
+    async def _sanitize_registered_privacy(
+        self,
+        content: str,
+        *,
+        ctx: RequestContext,
+        uri: str,
+    ) -> str:
+        if self._privacy_sanitizer is None or not content:
+            return content
+        result = await self._privacy_sanitizer.sanitize(content, ctx=ctx, uri=uri)
+        if result.ambiguous_references:
+            raise InvalidArgumentError(
+                "Skill content contains a Privacy value mapped to multiple fields; "
+                "insert the intended owner-bound reference explicitly",
+                details={
+                    "uri": uri,
+                    "candidate_references": [
+                        list(candidates) for candidates in result.ambiguous_references
+                    ],
+                },
+            )
+        return result.content
 
     async def apply_skill_privacy(
         self,
@@ -586,9 +628,25 @@ class SkillProcessor:
         """Write main skill content to VikingFS."""
         from openviking.storage.abstract_overview import write_abstract_overview
 
-        await viking_fs.write_file(
-            f"{skill_dir_uri}/SKILL.md",
+        skill_md_uri = f"{skill_dir_uri}/SKILL.md"
+        serialized = await self._sanitize_registered_privacy(
             SkillLoader.to_skill_md(skill_dict),
+            ctx=ctx,
+            uri=skill_md_uri,
+        )
+        abstract = await self._sanitize_registered_privacy(
+            abstract,
+            ctx=ctx,
+            uri=f"{skill_dir_uri}/.abstract.md",
+        )
+        overview = await self._sanitize_registered_privacy(
+            overview,
+            ctx=ctx,
+            uri=f"{skill_dir_uri}/.overview.md",
+        )
+        await viking_fs.write_file(
+            skill_md_uri,
+            serialized,
             ctx=ctx,
             lease_ref=lease_ref,
         )
@@ -629,9 +687,14 @@ class SkillProcessor:
                 is_text = False
 
             if is_text:
+                text_content = await self._sanitize_registered_privacy(
+                    file_bytes.decode("utf-8"),
+                    ctx=ctx,
+                    uri=aux_uri,
+                )
                 await viking_fs.write_file(
                     aux_uri,
-                    file_bytes.decode("utf-8"),
+                    text_content,
                     ctx=ctx,
                     lease_ref=lease_ref,
                 )

@@ -701,7 +701,12 @@ class ReindexExecutor:
             target_uri=uri,
             processing_mode=mode,
             ingest_options=run.ingest_options,
-            force=run.force,
+            # A Skill package has exactly one capability document plus its L0/L1
+            # sidecars. ``vectors_only`` is expected to rebuild all three even
+            # when their md5 values are unchanged (the public API regression
+            # contract relies on this), while other RFV targets retain the
+            # caller-controlled force behavior.
+            force=run.force or (context_type == "skill" and mode == "vectors_only"),
             scalar_target_levels=frozenset({0, 1, 2}),
         )
         snapshot = await build_rfv_snapshot(

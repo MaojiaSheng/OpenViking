@@ -20,6 +20,7 @@ from openviking.core.namespace import context_type_for_uri
 from openviking.parse.image_rewrite import rewrite_image_uris
 from openviking.parse.mode import ParseMode, normalize_parse_mode
 from openviking.parse.tree_builder import TreeBuilder
+from openviking.privacy.sanitizer import PrivacySanitizer
 from openviking.resource.processing_mode import (
     DEFAULT_PROCESSING_MODE,
     VECTORS_ONLY,
@@ -115,6 +116,83 @@ class ResourceProcessor:
         self._vlm_processor = None
         self._media_processor = None
         self._summarizer = None
+        self._privacy_sanitizer: PrivacySanitizer | None = None
+
+    def set_privacy_sanitizer(self, sanitizer: PrivacySanitizer | None) -> None:
+        self._privacy_sanitizer = sanitizer
+
+    async def _sanitize_parse_artifact(
+        self,
+        *,
+        store: Any,
+        artifact_ref: Any,
+        doc_rel: str,
+        target_root_uri: str,
+        ctx: RequestContext,
+    ) -> None:
+        """Rewrite text in a temporary parse artifact before planning or persistence."""
+        if self._privacy_sanitizer is None:
+            return
+        from openviking.parse.output import read_artifact_manifest, write_artifact_manifest
+        from openviking.utils.content_hash import content_md5
+        from openviking_cli.exceptions import InvalidArgumentError
+
+        base = (doc_rel or "").strip("/")
+        prefix = f"{base}/" if base else ""
+        manifest = await read_artifact_manifest(store, artifact_ref)
+        changed = False
+
+        async def sanitize_file(artifact_path: str, relative: str) -> None:
+            nonlocal changed
+            data = await store.read_bytes(artifact_ref, artifact_path)
+            try:
+                content = data.decode("utf-8")
+            except UnicodeDecodeError:
+                return
+            uri = (
+                target_root_uri.rstrip("/")
+                if not relative
+                else f"{target_root_uri.rstrip('/')}/{relative}"
+            )
+            result = await self._privacy_sanitizer.sanitize(content, ctx=ctx, uri=uri)
+            if result.ambiguous_references:
+                raise InvalidArgumentError(
+                    "Resource content contains a Privacy value mapped to multiple fields; "
+                    "insert the intended owner-bound reference explicitly",
+                    details={
+                        "uri": uri,
+                        "candidate_references": [
+                            list(candidates) for candidates in result.ambiguous_references
+                        ],
+                    },
+                )
+            if result.content == content:
+                return
+            final_bytes = result.content.encode("utf-8")
+            await store.write_bytes(artifact_ref, artifact_path, final_bytes)
+            manifest[artifact_path] = content_md5(final_bytes)
+            changed = True
+
+        async def walk(directory: str) -> None:
+            for entry in await store.list(artifact_ref, directory):
+                if entry.is_dir:
+                    await walk(entry.rel_path)
+                    continue
+                if entry.name.startswith("."):
+                    continue
+                relative = (
+                    entry.rel_path[len(prefix) :]
+                    if prefix and entry.rel_path.startswith(prefix)
+                    else entry.rel_path
+                )
+                await sanitize_file(entry.rel_path, relative)
+
+        if getattr(artifact_ref, "root_type", "dir") == "file":
+            await sanitize_file(base, "")
+        else:
+            await walk(base)
+        if changed:
+            await write_artifact_manifest(store, artifact_ref, manifest)
 
     async def github_token_for(
         self,
@@ -338,6 +416,14 @@ class ResourceProcessor:
             lease_ref=lease_ref,
         )
         telemetry = get_current_telemetry()
+        await self._sanitize_parse_artifact(
+            store=output_store,
+            artifact_ref=artifact_ref,
+            doc_rel=doc_rel,
+            target_root_uri=root_uri,
+            ctx=ctx,
+        )
+        commit_store = _DocRelStore(output_store, doc_rel)
         artifact_backend = str(getattr(artifact_ref, "backend", "unknown"))
         update_plan_started_at = time.perf_counter()
         try:
@@ -397,7 +483,7 @@ class ResourceProcessor:
             with telemetry.measure("resource.update_plan.diff_and_compile"):
                 diff, context_plan = await build_context_update_plan_from_snapshot(
                     snapshot=rnfv,
-                    store=_DocRelStore(output_store, doc_rel),
+                    store=commit_store,
                     artifact_ref=artifact_ref,
                     target=target,
                     vikingdb=self.vikingdb,
@@ -439,7 +525,7 @@ class ResourceProcessor:
             with telemetry.measure("resource.content_commit"):
                 await execute_content_tree_actions(
                     context_plan.content_tree_actions,
-                    store=_DocRelStore(output_store, doc_rel),
+                    store=commit_store,
                     artifact_ref=artifact_ref,
                     target=target,
                 )

@@ -4,14 +4,21 @@
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Path
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, Path, Query
+from pydantic import BaseModel, ConfigDict, Field
 
+from openviking.privacy.reference import (
+    build_privacy_field_reference,
+    parse_privacy_field_selector,
+    parse_privacy_target_selector,
+)
+from openviking.privacy.sanitizer import PrivacySanitizer
+from openviking.privacy.scan import scan_privacy_content
 from openviking.server.auth import get_request_context
-from openviking_cli.exceptions import NotFoundError
 from openviking.server.dependencies import get_service
 from openviking.server.identity import RequestContext
 from openviking.server.models import Response
+from openviking_cli.exceptions import InvalidArgumentError, NotFoundError, PermissionDeniedError
 
 router = APIRouter(prefix="/api/v1/privacy-configs", tags=["privacy-configs"])
 
@@ -40,6 +47,30 @@ class ActivatePrivacyConfigVersionRequest(BaseModel):
     version: int
 
 
+class ScanPrivacyContentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scopes: list[str] = Field(default_factory=list)
+    target_uri: str = ""
+    fix: bool = False
+    wait: bool = False
+    node_limit: int = 10000
+
+
+class PrivacySelectorRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selector: str
+
+
+def _require_selector_owner(owner_user_id: str, ctx: RequestContext) -> None:
+    if owner_user_id != ctx.user.user_id:
+        raise PermissionDeniedError(
+            f"Privacy reference belongs to user {owner_user_id}",
+            resource=owner_user_id,
+        )
+
+
 @router.get("")
 async def list_privacy_categories(
     _ctx: RequestContext = Depends(get_request_context),
@@ -48,6 +79,126 @@ async def list_privacy_categories(
     privacy = service.privacy_configs
     result = [] if privacy is None else await privacy.list_categories(_ctx)
     return Response(status="ok", result=result)
+
+
+@router.post("/scan")
+async def scan_privacy_configs(
+    request: ScanPrivacyContentRequest,
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    service = get_service()
+    privacy = service.privacy_configs
+    if privacy is None:
+        return Response(status="ok", result={"matches": [], "matched_files": 0})
+    result = await scan_privacy_content(
+        service=service,
+        ctx=_ctx,
+        sanitizer=PrivacySanitizer(privacy),
+        scopes=request.scopes,
+        target_uri=request.target_uri,
+        fix=request.fix,
+        wait=request.wait,
+        node_limit=max(1, min(request.node_limit, 100000)),
+    )
+    return Response(status="ok", result=result)
+
+
+@router.post("/resolve")
+async def resolve_privacy_reference(
+    request: PrivacySelectorRequest,
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    reference = parse_privacy_field_selector(
+        request.selector,
+        current_user_id=_ctx.user.user_id,
+    )
+    if reference is None:
+        raise InvalidArgumentError(
+            "selector must be an owner-bound Privacy reference or a field-level Privacy URI"
+        )
+    _require_selector_owner(reference.owner_user_id, _ctx)
+    service = get_service()
+    privacy = service.privacy_configs
+    await _require_privacy_target(privacy, _ctx, reference.category, reference.target_key)
+    current = await privacy.get_current(_ctx, reference.category, reference.target_key)
+    if current is None or reference.field not in current.values:
+        raise NotFoundError(request.selector, "privacy config field")
+    value = current.values[reference.field]
+    return Response(
+        status="ok",
+        result={
+            "owner_user_id": reference.owner_user_id,
+            "category": reference.category,
+            "target_key": reference.target_key,
+            "field": reference.field,
+            "version": current.version,
+            "configured": value is not None and str(value) != "",
+            "reference": reference.render(),
+            "value": value,
+        },
+    )
+
+
+@router.delete("/selector")
+async def delete_privacy_selector(
+    request: PrivacySelectorRequest,
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    service = get_service()
+    privacy = service.privacy_configs
+    field_reference = parse_privacy_field_selector(
+        request.selector,
+        current_user_id=_ctx.user.user_id,
+    )
+    if field_reference is not None:
+        _require_selector_owner(field_reference.owner_user_id, _ctx)
+        outcome = await privacy.delete_field(
+            _ctx,
+            field_reference.category,
+            field_reference.target_key,
+            field_reference.field,
+            updated_by=_ctx.user.user_id,
+        )
+        if outcome is None:
+            raise NotFoundError(request.selector, "privacy config field")
+        return Response(
+            status="ok",
+            result={
+                "owner_user_id": field_reference.owner_user_id,
+                "category": field_reference.category,
+                "target_key": field_reference.target_key,
+                "field": field_reference.field,
+                "deleted": True,
+                "scope": "field",
+                "target_deleted": outcome.target_deleted,
+                "active_version": outcome.active_version,
+            },
+        )
+
+    target_reference = parse_privacy_target_selector(
+        request.selector,
+        current_user_id=_ctx.user.user_id,
+    )
+    if target_reference is None:
+        raise InvalidArgumentError(
+            "selector must be a Privacy target URI, field URI, or owner-bound reference"
+        )
+    _require_selector_owner(target_reference.owner_user_id, _ctx)
+    deleted = await privacy.delete(
+        _ctx,
+        target_reference.category,
+        target_reference.target_key,
+    )
+    return Response(
+        status="ok",
+        result={
+            "owner_user_id": target_reference.owner_user_id,
+            "category": target_reference.category,
+            "target_key": target_reference.target_key,
+            "deleted": deleted,
+            "scope": "target",
+        },
+    )
 
 
 @router.get("/{category}")
@@ -77,6 +228,83 @@ async def get_privacy_current(
         result={
             "meta": None if meta is None else meta.to_dict(),
             "current": None if current is None else current.to_dict(),
+        },
+    )
+
+
+@router.get("/{category}/{target_key}/field")
+async def get_privacy_field(
+    category: str = Path(..., description="Privacy config category"),
+    target_key: str = Path(..., description="Privacy config target key"),
+    field: str = Query(..., min_length=1, description="Field in current values"),
+    reveal: bool = Query(False, description="Include the active field value"),
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    """Return one active field and its owner-bound reference.
+
+    The safe default omits the value. Callers must opt in with ``reveal=true``
+    when the plaintext is required for immediate use.
+    """
+    service = get_service()
+    privacy = service.privacy_configs
+    await _require_privacy_target(privacy, _ctx, category, target_key)
+    current = await privacy.get_current(_ctx, category, target_key)
+    if current is None or field not in current.values:
+        raise NotFoundError(
+            f"{category}/{target_key}/fields/{field}",
+            "privacy config field",
+        )
+
+    value = current.values[field]
+    result = {
+        "owner_user_id": _ctx.user.user_id,
+        "category": category,
+        "target_key": target_key,
+        "field": field,
+        "version": current.version,
+        "configured": value is not None and str(value) != "",
+        "reference": build_privacy_field_reference(
+            _ctx.user.user_id,
+            category,
+            target_key,
+            field,
+        ),
+    }
+    if reveal:
+        result["value"] = value
+    return Response(status="ok", result=result)
+
+
+@router.delete("/{category}/{target_key}/field")
+async def delete_privacy_field(
+    category: str = Path(..., description="Privacy config category"),
+    target_key: str = Path(..., description="Privacy config target key"),
+    field: str = Query(..., min_length=1, description="Field to remove from active values"),
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    service = get_service()
+    privacy = service.privacy_configs
+    await _require_privacy_target(privacy, _ctx, category, target_key)
+    outcome = await privacy.delete_field(
+        _ctx,
+        category,
+        target_key,
+        field,
+        updated_by=_ctx.user.user_id,
+    )
+    if outcome is None:
+        raise NotFoundError(f"{category}/{target_key}/fields/{field}", "privacy config field")
+    return Response(
+        status="ok",
+        result={
+            "owner_user_id": _ctx.user.user_id,
+            "category": category,
+            "target_key": target_key,
+            "field": field,
+            "deleted": True,
+            "scope": "field",
+            "target_deleted": outcome.target_deleted,
+            "active_version": outcome.active_version,
         },
     )
 
@@ -131,6 +359,28 @@ async def upsert_privacy_config(
             labels=request.labels,
         )
     return Response(status="ok", result=None if result is None else result.to_dict())
+
+
+@router.delete("/{category}/{target_key}")
+async def delete_privacy_config(
+    category: str = Path(..., description="Privacy config category"),
+    target_key: str = Path(..., description="Privacy config target key"),
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    """Delete a target's current value, metadata, and complete version history."""
+    service = get_service()
+    privacy = service.privacy_configs
+    deleted = False
+    if privacy is not None:
+        deleted = await privacy.delete(_ctx, category, target_key)
+    return Response(
+        status="ok",
+        result={
+            "category": category,
+            "target_key": target_key,
+            "deleted": deleted,
+        },
+    )
 
 
 @router.post("/{category}/{target_key}/activate")

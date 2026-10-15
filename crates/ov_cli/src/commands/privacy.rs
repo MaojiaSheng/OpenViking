@@ -3,6 +3,7 @@ use crate::error::{Error, Result};
 use crate::output::{OutputFormat, output_success};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
+use std::io::{self, IsTerminal, Write};
 
 fn parse_kv_pairs(pairs: &[String]) -> Result<HashMap<String, String>> {
     let mut parsed: HashMap<String, String> = HashMap::new();
@@ -246,6 +247,47 @@ pub async fn get_current(
     Ok(())
 }
 
+pub async fn reference(
+    client: &HttpClient,
+    category: &str,
+    target_key: &str,
+    field: &str,
+    output_format: OutputFormat,
+    compact: bool,
+) -> Result<()> {
+    let result = client
+        .privacy_get_field(category, target_key, field, false)
+        .await?;
+    output_success(&result, output_format, compact);
+    Ok(())
+}
+
+pub async fn resolve(
+    client: &HttpClient,
+    selector_or_category: &str,
+    target_key: Option<&str>,
+    field: Option<&str>,
+    output_format: OutputFormat,
+    compact: bool,
+) -> Result<()> {
+    let result = match (target_key, field) {
+        (None, None) => client.privacy_resolve_selector(selector_or_category).await?,
+        (Some(target_key), Some(field)) => {
+            client
+                .privacy_get_field(selector_or_category, target_key, field, true)
+                .await?
+        }
+        _ => {
+            return Err(Error::Client(
+                "Resolve accepts either one reference/field URI or category target field."
+                    .to_string(),
+            ));
+        }
+    };
+    output_success(&result, output_format, compact);
+    Ok(())
+}
+
 pub async fn list_versions(
     client: &HttpClient,
     category: &str,
@@ -294,6 +336,94 @@ pub async fn activate(
 
     output_success(&result, output_format, compact);
     Ok(())
+}
+
+pub async fn delete(
+    client: &HttpClient,
+    selector_or_category: &str,
+    target_key: Option<&str>,
+    field: Option<&str>,
+    yes: bool,
+    output_format: OutputFormat,
+    compact: bool,
+) -> Result<()> {
+    let display = match (target_key, field) {
+        (None, None) => selector_or_category.to_string(),
+        (Some(target), None) => format!("{selector_or_category}/{target}"),
+        (Some(target), Some(field)) => format!("{selector_or_category}/{target}#{field}"),
+        (None, Some(_)) => unreachable!("Clap cannot supply the third positional alone"),
+    };
+    if !yes && !confirm_delete(&display)? {
+        output_success(
+            &serde_json::json!({
+                "selector": display,
+                "deleted": false,
+                "cancelled": true,
+            }),
+            output_format,
+            compact,
+        );
+        return Ok(());
+    }
+
+    let result = match (target_key, field) {
+        (None, None) => client.privacy_delete_selector(selector_or_category).await?,
+        (Some(target), None) => client.privacy_delete(selector_or_category, target).await?,
+        (Some(target), Some(field)) => {
+            client
+                .privacy_delete_field(selector_or_category, target, field)
+                .await?
+        }
+        (None, Some(_)) => unreachable!("Clap cannot supply the third positional alone"),
+    };
+    output_success(&result, output_format, compact);
+    Ok(())
+}
+
+pub async fn scan(
+    client: &HttpClient,
+    scopes: &[String],
+    target_uri: Option<&str>,
+    fix: bool,
+    wait: bool,
+    node_limit: usize,
+    output_format: OutputFormat,
+    compact: bool,
+) -> Result<()> {
+    if target_uri.is_some() && !scopes.is_empty() {
+        return Err(Error::Client(
+            "Pass either --target or --scope, not both.".to_string(),
+        ));
+    }
+    let body = serde_json::json!({
+        "scopes": scopes,
+        "target_uri": target_uri.unwrap_or(""),
+        "fix": fix,
+        "wait": wait,
+        "node_limit": node_limit,
+    });
+    let result = client.privacy_scan(&body).await?;
+    output_success(&result, output_format, compact);
+    Ok(())
+}
+
+fn confirm_delete(display: &str) -> Result<bool> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(Error::Client(
+            "Deleting a privacy target requires confirmation. Pass --yes to skip the prompt."
+                .to_string(),
+        ));
+    }
+
+    print!(
+        "Delete Privacy selection {}? [y/N]: ",
+        display
+    );
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    let answer = answer.trim().to_ascii_lowercase();
+    Ok(answer == "y" || answer == "yes")
 }
 
 pub async fn upsert(

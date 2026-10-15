@@ -772,7 +772,7 @@ const COMMAND_HELP_SPECS: &[CommandHelpSpec] = &[
     },
     CommandHelpSpec {
         path: &["privacy"],
-        purpose: "Manage privacy config categories, targets, versions, and activation.",
+        purpose: "Manage privacy targets, field references, values, versions, and cleanup.",
         examples: &[
             HelpItem {
                 label: "ov privacy categories",
@@ -781,6 +781,18 @@ const COMMAND_HELP_SPECS: &[CommandHelpSpec] = &[
             HelpItem {
                 label: "ov privacy get <category> <target>",
                 description: "Show active values for one target.",
+            },
+            HelpItem {
+                label: "ov privacy reference <category> <target> <field>",
+                description: "Show the owner-bound reference without revealing the value.",
+            },
+            HelpItem {
+                label: "ov privacy resolve <reference-or-field-uri>",
+                description: "Explicitly reveal the referenced active field value.",
+            },
+            HelpItem {
+                label: "ov privacy scan --scope resources,skills,memories",
+                description: "Dry-run scan for registered Privacy values in stored content.",
             },
         ],
         next_steps: &[HelpItem {
@@ -3173,7 +3185,7 @@ mod tests {
             ),
             (
                 "privacy",
-                "Manage privacy config categories, targets, versions, and activation.",
+                "Manage privacy targets, field references, values, versions, and cleanup.",
             ),
             ("admin", "Manage accounts, users, roles, and API keys."),
             (
