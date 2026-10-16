@@ -6,6 +6,7 @@ Skill Processor for OpenViking.
 Handles skill parsing, LLM generation, and storage operations.
 """
 
+import re
 import shutil
 import tempfile
 import time
@@ -21,6 +22,7 @@ from openviking.config.vlm import VLMHandle, VLMResolver
 from openviking.core.mcp_converter import is_mcp_format, mcp_to_skill
 from openviking.core.namespace import canonical_user_root
 from openviking.core.skill_loader import SkillLoader
+from openviking.privacy.reference import parse_privacy_field_reference
 from openviking.privacy.sanitizer import PrivacySanitizer
 from openviking.privacy.service import UserPrivacyConfigService
 from openviking.privacy.skill_extractor import extract_skill_privacy_values
@@ -488,10 +490,7 @@ class SkillProcessor:
         if not self._privacy_config_service:
             return skill_dict, {}
 
-        skill_uri = (
-            f"{canonical_user_root(ctx)}/skills/"
-            f"{skill_dict.get('name', '')}/SKILL.md"
-        )
+        skill_uri = f"{canonical_user_root(ctx)}/skills/{skill_dict.get('name', '')}/SKILL.md"
         content = skill_dict.get("content", "")
         sanitized_by_catalog = await self._sanitize_registered_privacy(
             content,
@@ -549,6 +548,28 @@ class SkillProcessor:
             )
         return result.content
 
+    @staticmethod
+    def _referenced_privacy_fields(skill_dict: Dict[str, Any], ctx: RequestContext) -> set[str]:
+        """Find references to this Skill's own config without resolving secrets."""
+        skill_name = skill_dict["name"]
+        legacy_prefix = f"{{{{ov_privacy:skill:{skill_name}:"
+        fields: set[str] = set()
+        for text in (skill_dict.get("content", ""), skill_dict.get("description", "")):
+            for placeholder in re.findall(r"\{\{[^{}\r\n]*\}\}", text or ""):
+                reference = parse_privacy_field_reference(placeholder)
+                if reference is not None:
+                    if (
+                        reference.owner_user_id == ctx.user.user_id
+                        and reference.category == "skill"
+                        and reference.target_key == skill_name
+                    ):
+                        fields.add(reference.field)
+                elif placeholder.startswith(legacy_prefix):
+                    field_name = placeholder[len(legacy_prefix) : -2]
+                    if field_name and ":" not in field_name:
+                        fields.add(field_name)
+        return fields
+
     async def apply_skill_privacy(
         self,
         skill_dict: Dict[str, Any],
@@ -562,7 +583,8 @@ class SkillProcessor:
         if not self._privacy_config_service:
             return skill_dict
 
-        if privacy_values:
+        referenced_fields = self._referenced_privacy_fields(skill_dict, ctx)
+        if privacy_values or referenced_fields:
             await self._privacy_config_service.upsert(
                 ctx=ctx,
                 category="skill",
@@ -571,6 +593,7 @@ class SkillProcessor:
                 updated_by=ctx.user.user_id,
                 change_reason=change_reason,
                 **({"owner_lease_ref": owner_lease_ref} if owner_lease_ref is not None else {}),
+                **({"preserve_fields": referenced_fields} if referenced_fields else {}),
             )
             return skill_dict
 

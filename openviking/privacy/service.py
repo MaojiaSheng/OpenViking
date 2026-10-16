@@ -246,10 +246,21 @@ class UserPrivacyConfigService:
         labels: Optional[dict[str, Any]] = None,
         *,
         owner_lease_ref: Optional[dict[str, Any]] = None,
+        preserve_fields: Optional[set[str]] = None,
     ) -> UserPrivacyConfigVersion:
         async with self._config_lock(
             ctx, category, target_key, owner_lease_ref=owner_lease_ref
         ) as lease:
+            if preserve_fields:
+                # Resolve retained references under the write lock so a Skill
+                # prepared before a credential rotation keeps the latest value.
+                current = await self.get_current(ctx, category, target_key)
+                retained = (
+                    {key: value for key, value in current.values.items() if key in preserve_fields}
+                    if current is not None
+                    else {}
+                )
+                values = {**retained, **values}
             return await self._upsert_locked(
                 ctx=ctx,
                 category=category,
