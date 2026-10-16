@@ -279,7 +279,7 @@ POST /api/v1/privacy-configs/resolve
 
 Field URIs may use `viking://~/privacy/...#/values/...` or an explicit `viking://user/{user_id}/privacy/...#/values/...`. An explicit owner that differs from the current identity returns `PERMISSION_DENIED`.
 
-References generated, stored, and returned by OpenViking always use the whitespace-free canonical form. The parser accepts spaces or tabs immediately after `{{` and before `}}`, such as `{{ ov_privacy:alice:... }}`, then normalizes the result to `{{ov_privacy:alice:...}}`. Whitespace is not accepted inside the owner, URI, or path tokens.
+References generated, stored, and returned by OpenViking always use the whitespace-free canonical form. The parser accepts spaces or tabs immediately inside the outer braces, such as <code>&#123;&#123; ov_privacy:alice:... &#125;&#125;</code>, then normalizes the result to <code>&#123;&#123;ov_privacy:alice:...&#125;&#125;</code>. Whitespace is not accepted inside the owner, URI, or path tokens.
 
 ---
 

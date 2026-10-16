@@ -283,7 +283,7 @@ POST /api/v1/privacy-configs/resolve
 
 字段 URI 支持 `viking://~/privacy/...#/values/...` 和显式 `viking://user/{user_id}/privacy/...#/values/...`。显式 owner 与当前身份不一致时返回 `PERMISSION_DENIED`。
 
-OpenViking 生成、保存和返回的 canonical reference 始终不带空格。解析器兼容 `{{` 后和 `}}` 前的空格或 Tab，例如 `{{ ov_privacy:alice:... }}`，解析后仍规范化为 `{{ov_privacy:alice:...}}`；owner、URI 和路径字段内部不允许插入空白。
+OpenViking 生成、保存和返回的 canonical reference 始终不带空格。解析器兼容双左花括号后和双右花括号前的空格或 Tab，例如 <code>&#123;&#123; ov_privacy:alice:... &#125;&#125;</code>，解析后仍规范化为 <code>&#123;&#123;ov_privacy:alice:...&#125;&#125;</code>；owner、URI 和路径字段内部不允许插入空白。
 
 ---
 
