@@ -76,6 +76,62 @@ async def test_privacy_config_update_allows_new_keys(client: httpx.AsyncClient):
     assert body["result"]["values"]["new_key"] == "x"
 
 
+async def test_privacy_config_patch_creates_target_and_atomically_merges_fields(
+    client: httpx.AsyncClient,
+):
+    created = await client.patch(
+        "/api/v1/privacy-configs/credential/github",
+        json={"values": {"pat": "github_pat_mock_value"}, "change_reason": "initial"},
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["result"]["version"] == 1
+    assert created.json()["result"]["values"] == {"pat": "github_pat_mock_value"}
+
+    updated = await client.patch(
+        "/api/v1/privacy-configs/credential/github",
+        json={"values": {"username": "alice"}, "change_reason": "add username"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["result"]["version"] == 2
+    assert updated.json()["result"]["values"] == {
+        "pat": "github_pat_mock_value",
+        "username": "alice",
+    }
+
+
+async def test_privacy_api_rejects_invalid_target_with_structured_format_error(
+    client: httpx.AsyncClient,
+):
+    response = await client.patch(
+        "/api/v1/privacy-configs/credential/two@@signs",
+        json={"values": {"pat": "github_pat_mock_value"}},
+    )
+    assert response.status_code == 400, response.text
+    error = response.json()["error"]
+    assert error["code"] == "INVALID_ARGUMENT"
+    assert error["message"] == "Invalid Privacy target_key: must contain at most one '@'."
+    assert error["details"] == {
+        "field": "target_key",
+        "reason": "must contain at most one '@'",
+        "allowed_pattern": "[A-Za-z0-9_.@-]+",
+        "max_characters": 255,
+    }
+
+
+async def test_privacy_api_rejects_oversized_values_without_echoing_secret(
+    client: httpx.AsyncClient,
+):
+    secret = "sensitive-marker-" + "x" * (64 * 1024)
+    response = await client.post(
+        "/api/v1/privacy-configs/credential/oversized",
+        json={"values": {"pat": secret}},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_ARGUMENT"
+    assert response.json()["error"]["details"]["reason"] == "string value too large"
+    assert secret not in response.text
+
+
 async def test_privacy_config_get_version_not_found(client: httpx.AsyncClient):
     create = await client.post(
         "/api/v1/privacy-configs/skill/demo-skill-version-not-found",
@@ -171,6 +227,55 @@ async def test_privacy_field_reference_is_safe_by_default_and_reveal_is_explicit
     )
     assert missing_response.status_code == 404
     assert missing_response.json()["error"]["code"] == "NOT_FOUND"
+
+
+async def test_privacy_field_list_returns_metadata_without_values(
+    client: httpx.AsyncClient,
+):
+    created = await client.post(
+        "/api/v1/privacy-configs/credential/github-fields",
+        json={"values": {"region": "", "pat": "github-secret-value"}},
+    )
+    assert created.status_code == 200, created.text
+    owner = created.json()["result"]["created_by"]
+
+    response = await client.get(
+        "/api/v1/privacy-configs/credential/github-fields/fields"
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result == {
+        "owner_user_id": owner,
+        "category": "credential",
+        "target_key": "github-fields",
+        "version": 1,
+        "fields": [
+            {
+                "field": "pat",
+                "configured": True,
+                "reference": (
+                    f"{{{{ov_privacy:{owner}:viking://~/privacy/credential/"
+                    "github-fields#/values/pat}}"
+                ),
+            },
+            {
+                "field": "region",
+                "configured": False,
+                "reference": (
+                    f"{{{{ov_privacy:{owner}:viking://~/privacy/credential/"
+                    "github-fields#/values/region}}"
+                ),
+            },
+        ],
+    }
+    assert "github-secret-value" not in response.text
+    assert all("value" not in field for field in result["fields"])
+
+    missing = await client.get(
+        "/api/v1/privacy-configs/credential/missing-fields/fields"
+    )
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "NOT_FOUND"
 
 
 async def test_privacy_config_delete_is_idempotent_and_removes_history(

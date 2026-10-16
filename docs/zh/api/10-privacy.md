@@ -25,9 +25,11 @@
 | POST | `/api/v1/privacy-configs/scan` | 扫描或修复已存储正文中的登记值 |
 | GET | `/api/v1/privacy-configs/{category}` | 列出分类下目标 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | 获取当前生效配置（meta + current） |
+| GET | `/api/v1/privacy-configs/{category}/{target_key}/fields` | 列出不含明文值的安全字段元数据 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/field` | 获取单字段引用；显式选择时返回值 |
 | POST | `/api/v1/privacy-configs/resolve` | 按字段 reference/URI 显式读取值 |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | 写入新版本并激活 |
+| PATCH | `/api/v1/privacy-configs/{category}/{target_key}` | 原子合并字段；目标不存在时创建 |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | 删除目标及全部版本 |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | 删除当前生效配置中的字段 |
 | DELETE | `/api/v1/privacy-configs/selector` | 按 target URI 或字段 reference/URI 删除 |
@@ -73,6 +75,23 @@
   }
 }
 ```
+
+### 输入格式与容量限制
+
+服务端对 HTTP、CLI、Embedded 和内部写入执行同一套验证：
+
+| 项目 | 限制 |
+|------|------|
+| `category` / `target_key` | 非空、最多 255 个 ASCII 字符；仅允许字母、数字、`_`、`-`、`.`、`@`；禁止 `.`、`..`，`@` 最多一个 |
+| values 顶层字段 | 最多 128 个 |
+| 字段名 | 非空、最多 255 UTF-8 字节、禁止控制字符 |
+| 单个字符串值 | 最多 64 KiB UTF-8 |
+| values 序列化总量 | 最多 1 MiB |
+| JSON 嵌套 | 最多 16 层；单个对象或数组最多 4096 项 |
+| labels | 最多 64 项，序列化总量最多 64 KiB |
+| `change_reason` | 最多 1024 个字符 |
+
+违反限制时返回 `INVALID_ARGUMENT`，`details` 包含字段、原因、实际大小和允许上限。错误信息不会包含敏感值正文。
 
 ---
 
@@ -196,6 +215,35 @@ curl -X GET "http://localhost:1933/api/v1/privacy-configs/skill/byted-viking-sea
 
 ---
 
+### list_privacy_fields()
+
+列出当前生效字段的名称、配置状态和 owner-bound reference，不返回任何明文值。CLI 在 `reference` 或 `resolve` 的 category 形式省略字段时使用该接口：仅当 target 恰好有一个字段时自动推断；存在多个字段时列出可选项并要求显式指定。
+
+```text
+GET /api/v1/privacy-configs/{category}/{target_key}/fields
+```
+
+```json
+{
+  "status": "ok",
+  "result": {
+    "owner_user_id": "alice",
+    "category": "credential",
+    "target_key": "github-prod",
+    "version": 1,
+    "fields": [
+      {
+        "field": "pat",
+        "configured": true,
+        "reference": "{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/pat}}"
+      }
+    ]
+  }
+}
+```
+
+---
+
 ### get_privacy_field()
 
 获取当前生效版本中的单个字段。默认只返回带 owner 的引用和配置状态，不返回实际值；`reveal=true` 是供立即使用场景显式读取单字段的接口。
@@ -299,6 +347,29 @@ curl -X POST "http://localhost:1933/api/v1/privacy-configs/skill/byted-viking-se
     "change_reason": "rotate key"
   }
 }
+```
+
+---
+
+### patch_privacy_config()
+
+在服务端 target 锁内将 `values` 合并到当前配置。target 不存在时以空对象为基础创建版本 1；target 已存在时保留未涉及的字段并创建新版本。读取、合并和写入在同一把锁内完成，并发更新不同字段不会因客户端 read-modify-write 丢失。
+
+```text
+PATCH /api/v1/privacy-configs/{category}/{target_key}
+```
+
+```json
+{
+  "values": {"pat": "github_pat_..."},
+  "change_reason": "configure GitHub PAT"
+}
+```
+
+CLI 规范参数 `--field` 与 `--field-*` 使用该接口，不在 CLI 中预读 current；`--key` 与 `--key-*` 继续作为兼容别名：
+
+```bash
+ov privacy upsert credential github --field-pat 'github_pat_...'
 ```
 
 ---
@@ -459,10 +530,12 @@ ov privacy list skill
 ov privacy get skill byted-viking-search-knowledgebase
 ov privacy skill byted-viking-search-knowledgebase
 
-# 默认只取得 owner 绑定引用，不返回实际值
+# 默认只取得 owner 绑定引用，不返回实际值；仅有一个字段时可省略 field
+ov privacy reference credential github-prod
 ov privacy reference credential github-prod api_key
 
-# 显式读取当前生效版本中的一个字段
+# 显式读取当前生效版本中的一个字段，省略规则相同
+ov privacy resolve credential github-prod
 ov privacy resolve credential github-prod api_key
 ov privacy resolve '{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}'
 ov privacy resolve 'viking://~/privacy/credential/github-prod#/values/api_key'
@@ -474,9 +547,9 @@ ov privacy upsert skill byted-viking-search-knowledgebase \
 # 从本地 JSON 文件读取值，避免把值直接写入命令参数
 ov privacy upsert skill byted-viking-search-knowledgebase --values-file ./privacy-values.json
 
-# 仅更新部分 key（先读取 current 再合并）
+# 更新单个 field；target 不存在时直接创建，存在时在服务端原子合并
 ov privacy upsert skill byted-viking-search-knowledgebase \
-  --key-api_key secret-3
+  --field-api_key secret-3
 
 # 版本查询与切换
 ov privacy versions skill byted-viking-search-knowledgebase

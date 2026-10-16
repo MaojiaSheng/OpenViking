@@ -14,6 +14,7 @@ from openviking.privacy.reference import (
 )
 from openviking.privacy.sanitizer import PrivacySanitizer
 from openviking.privacy.scan import scan_privacy_content
+from openviking.privacy.validation import validate_privacy_field_name
 from openviking.server.auth import get_request_context
 from openviking.server.dependencies import get_service
 from openviking.server.identity import RequestContext
@@ -41,6 +42,14 @@ class UpsertPrivacyConfigRequest(BaseModel):
     labels: Optional[Dict[str, Any]] = None
 
 
+class PatchPrivacyConfigRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    values: Dict[str, Any]
+    change_reason: str = ""
+    labels: Optional[Dict[str, Any]] = None
+
+
 class ActivatePrivacyConfigVersionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -60,7 +69,7 @@ class ScanPrivacyContentRequest(BaseModel):
 class PrivacySelectorRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    selector: str
+    selector: str = Field(..., min_length=1, max_length=2048)
 
 
 def _require_selector_owner(owner_user_id: str, ctx: RequestContext) -> None:
@@ -117,6 +126,7 @@ async def resolve_privacy_reference(
             "selector must be an owner-bound Privacy reference or a field-level Privacy URI"
         )
     _require_selector_owner(reference.owner_user_id, _ctx)
+    validate_privacy_field_name(reference.field, location="field")
     service = get_service()
     privacy = service.privacy_configs
     await _require_privacy_target(privacy, _ctx, reference.category, reference.target_key)
@@ -232,6 +242,48 @@ async def get_privacy_current(
     )
 
 
+@router.get("/{category}/{target_key}/fields")
+async def list_privacy_fields(
+    category: str = Path(..., description="Privacy config category"),
+    target_key: str = Path(..., description="Privacy config target key"),
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    """List active field metadata without returning plaintext values."""
+    service = get_service()
+    privacy = service.privacy_configs
+    await _require_privacy_target(privacy, _ctx, category, target_key)
+    current = await privacy.get_current(_ctx, category, target_key)
+    if current is None:
+        raise NotFoundError(f"{category}/{target_key}", "privacy config")
+
+    fields = []
+    for field in sorted(current.values):
+        value = current.values[field]
+        fields.append(
+            {
+                "field": field,
+                "configured": value is not None and str(value) != "",
+                "reference": build_privacy_field_reference(
+                    _ctx.user.user_id,
+                    category,
+                    target_key,
+                    field,
+                ),
+            }
+        )
+
+    return Response(
+        status="ok",
+        result={
+            "owner_user_id": _ctx.user.user_id,
+            "category": category,
+            "target_key": target_key,
+            "version": current.version,
+            "fields": fields,
+        },
+    )
+
+
 @router.get("/{category}/{target_key}/field")
 async def get_privacy_field(
     category: str = Path(..., description="Privacy config category"),
@@ -282,6 +334,7 @@ async def delete_privacy_field(
     field: str = Query(..., min_length=1, description="Field to remove from active values"),
     _ctx: RequestContext = Depends(get_request_context),
 ):
+    validate_privacy_field_name(field, location="field")
     service = get_service()
     privacy = service.privacy_configs
     await _require_privacy_target(privacy, _ctx, category, target_key)
@@ -354,6 +407,30 @@ async def upsert_privacy_config(
             category=category,
             target_key=target_key,
             values=request.values,
+            updated_by=_ctx.user.user_id,
+            change_reason=request.change_reason,
+            labels=request.labels,
+        )
+    return Response(status="ok", result=None if result is None else result.to_dict())
+
+
+@router.patch("/{category}/{target_key}")
+async def patch_privacy_config(
+    request: PatchPrivacyConfigRequest,
+    category: str = Path(..., description="Privacy config category"),
+    target_key: str = Path(..., description="Privacy config target key"),
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    """Atomically merge fields into current values, creating the target if absent."""
+    service = get_service()
+    privacy = service.privacy_configs
+    result = None
+    if privacy is not None:
+        result = await privacy.patch_values(
+            ctx=_ctx,
+            category=category,
+            target_key=target_key,
+            updates=request.values,
             updated_by=_ctx.user.user_id,
             change_reason=request.change_reason,
             labels=request.labels,

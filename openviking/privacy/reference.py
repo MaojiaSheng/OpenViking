@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from urllib.parse import quote, unquote
 
 from openviking.core.identifiers import validate_user_id
+from openviking.privacy.validation import (
+    validate_privacy_field_name,
+    validate_privacy_identifier,
+)
 
 _REFERENCE_RE = re.compile(
     r"^\{\{[ \t]*ov_privacy:(?P<owner>[^\s:{}]+):viking://~/privacy/"
@@ -58,14 +62,9 @@ def build_privacy_field_reference(
     validation_error = validate_user_id(owner_user_id)
     if validation_error:
         raise ValueError(validation_error)
-    parts = {
-        "category": category,
-        "target_key": target_key,
-        "field": field,
-    }
-    for name, value in parts.items():
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"{name} must be a non-empty string")
+    validate_privacy_identifier(category, "category")
+    validate_privacy_identifier(target_key, "target_key")
+    validate_privacy_field_name(field, location="field")
 
     return (
         f"{{{{ov_privacy:{owner_user_id}:viking://~/privacy/"

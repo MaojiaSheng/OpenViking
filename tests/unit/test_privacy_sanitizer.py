@@ -40,16 +40,22 @@ def _ctx(user_id="alice"):
     return RequestContext(user=UserIdentifier("account-a", user_id), role=Role.USER)
 
 
+def test_privacy_sanitizer_uses_native_ragfs_matcher():
+    sanitizer = PrivacySanitizer(_PrivacyCatalog())
+    assert sanitizer._matcher_class.__module__ == "ragfs_python"
+    assert sanitizer._matcher_class.__name__ == "PrivacyMatcher"
+
+
 def test_privacy_reference_roundtrip_encodes_individual_segments():
-    rendered = build_privacy_field_reference("alice", "custom config", "prod/key", "api/key")
+    rendered = build_privacy_field_reference("alice", "custom-config", "prod-key", "api/key")
     assert rendered == (
-        "{{ov_privacy:alice:viking://~/privacy/custom%20config/"
-        "prod%2Fkey#/values/api%2Fkey}}"
+        "{{ov_privacy:alice:viking://~/privacy/custom-config/"
+        "prod-key#/values/api%2Fkey}}"
     )
     assert parse_privacy_field_reference(rendered) == PrivacyFieldReference(
         owner_user_id="alice",
-        category="custom config",
-        target_key="prod/key",
+        category="custom-config",
+        target_key="prod-key",
         field="api/key",
     )
     spaced = rendered.replace("{{ov_privacy:", "{{  ov_privacy:").replace("}}", " \t}}")
@@ -61,22 +67,22 @@ def test_privacy_reference_roundtrip_encodes_individual_segments():
     assert parse_privacy_field_reference(rendered.replace("privacy/", "privacy/ ")) is None
     assert parse_privacy_field_reference(rendered.replace("{{", "{{\n")) is None
     assert parse_privacy_field_selector(
-        "viking://~/privacy/custom%20config/prod%2Fkey#/values/api%2Fkey",
+        "viking://~/privacy/custom-config/prod-key#/values/api%2Fkey",
         current_user_id="alice",
     ) == PrivacyFieldReference(
         owner_user_id="alice",
-        category="custom config",
-        target_key="prod/key",
+        category="custom-config",
+        target_key="prod-key",
         field="api/key",
     )
     target = parse_privacy_target_selector(
-        "viking://user/alice/privacy/custom%20config/prod%2Fkey",
+        "viking://user/alice/privacy/custom-config/prod-key",
         current_user_id="other",
     )
     assert target is not None
     assert target.owner_user_id == "alice"
-    assert target.category == "custom config"
-    assert target.target_key == "prod/key"
+    assert target.category == "custom-config"
+    assert target.target_key == "prod-key"
 
 
 async def test_sanitizer_protects_registered_strings_at_least_six_chars_without_field_guessing():

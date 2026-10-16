@@ -528,6 +528,7 @@ This catalog follows the routes actually mounted by the server. Each group headi
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions` | List configuration versions |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions/{version}` | Get one version |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | Write and activate a new version |
+| PATCH | `/api/v1/privacy-configs/{category}/{target_key}` | Atomically merge fields; create if missing |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}/activate` | Activate a version |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | Delete a target and every version |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | Remove the active field |

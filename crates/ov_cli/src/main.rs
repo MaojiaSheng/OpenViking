@@ -1968,7 +1968,7 @@ enum PrivacyCommands {
         target_key: String,
         /// Field in the current values object
         #[arg(value_name = "field")]
-        field: String,
+        field: Option<String>,
     },
     /// Reveal one active field value for immediate use
     Resolve {
@@ -2000,9 +2000,9 @@ enum PrivacyCommands {
             value_name = "path"
         )]
         values_file: Option<String>,
-        /// Existing key updates in key=value format (repeatable)
-        #[arg(long = "key", value_name = "key=value")]
-        key: Vec<String>,
+        /// Field updates in field=value format (repeatable; --key is a compatibility alias)
+        #[arg(long = "field", alias = "key", value_name = "field=value")]
+        field: Vec<String>,
         /// Change reason
         #[arg(long, default_value = "", value_name = "text")]
         change_reason: String,
@@ -2897,7 +2897,7 @@ fn preprocess_privacy_get_shortcut(args: Vec<OsString>) -> Vec<OsString> {
     out
 }
 
-fn preprocess_privacy_upsert_key_flags(args: Vec<OsString>) -> Vec<OsString> {
+fn preprocess_privacy_upsert_field_flags(args: Vec<OsString>) -> Vec<OsString> {
     let Some(cmd_idx) = find_command_index(&args) else {
         return args;
     };
@@ -2923,8 +2923,11 @@ fn preprocess_privacy_upsert_key_flags(args: Vec<OsString>) -> Vec<OsString> {
             continue;
         }
 
-        if i > cmd_idx + 1 && arg_lossy.starts_with("--key-") {
-            let suffix = &arg_lossy[6..];
+        let dynamic_field = arg_lossy
+            .strip_prefix("--field-")
+            .or_else(|| arg_lossy.strip_prefix("--key-"));
+        if i > cmd_idx + 1 && dynamic_field.is_some() {
+            let suffix = dynamic_field.expect("checked above");
             if suffix.is_empty() {
                 converted.push(args[i].clone());
                 i += 1;
@@ -2932,7 +2935,7 @@ fn preprocess_privacy_upsert_key_flags(args: Vec<OsString>) -> Vec<OsString> {
             }
 
             if let Some((key, value)) = suffix.split_once('=') {
-                converted.push(OsString::from("--key"));
+                converted.push(OsString::from("--field"));
                 converted.push(OsString::from(format!("{}={}", key, value)));
                 i += 1;
                 continue;
@@ -2940,7 +2943,7 @@ fn preprocess_privacy_upsert_key_flags(args: Vec<OsString>) -> Vec<OsString> {
 
             if i + 1 < args.len() {
                 let next_val = args[i + 1].to_string_lossy();
-                converted.push(OsString::from("--key"));
+                converted.push(OsString::from("--field"));
                 converted.push(OsString::from(format!("{}={}", suffix, next_val)));
                 i += 2;
                 continue;
@@ -3013,7 +3016,7 @@ fn pre_parse_output_options(args: &[OsString]) -> (OutputFormat, bool) {
 
 fn preprocess_privacy_args(args: Vec<OsString>) -> Vec<OsString> {
     let args = preprocess_privacy_get_shortcut(args);
-    preprocess_privacy_upsert_key_flags(args)
+    preprocess_privacy_upsert_field_flags(args)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6011,35 +6014,37 @@ mod tests {
     }
 
     #[test]
-    fn preprocess_key_dynamic_flag_to_static_form() {
-        let args = vec![
-            OsString::from("ov"),
-            OsString::from("privacy"),
-            OsString::from("upsert"),
-            OsString::from("skill"),
-            OsString::from("demo"),
-            OsString::from("--key-api_key"),
-            OsString::from("secret-v1"),
-        ];
+    fn preprocess_field_dynamic_flags_to_static_form() {
+        for dynamic_flag in ["--field-api_key", "--key-api_key"] {
+            let args = vec![
+                OsString::from("ov"),
+                OsString::from("privacy"),
+                OsString::from("upsert"),
+                OsString::from("skill"),
+                OsString::from("demo"),
+                OsString::from(dynamic_flag),
+                OsString::from("secret-v1"),
+            ];
 
-        let converted = preprocess_privacy_args(args);
-        let converted_strs: Vec<String> = converted
-            .into_iter()
-            .map(|s| s.to_string_lossy().to_string())
-            .collect();
+            let converted = preprocess_privacy_args(args);
+            let converted_strs: Vec<String> = converted
+                .into_iter()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
 
-        assert_eq!(
-            converted_strs,
-            vec![
-                "ov",
-                "privacy",
-                "upsert",
-                "skill",
-                "demo",
-                "--key",
-                "api_key=secret-v1",
-            ]
-        );
+            assert_eq!(
+                converted_strs,
+                vec![
+                    "ov",
+                    "privacy",
+                    "upsert",
+                    "skill",
+                    "demo",
+                    "--field",
+                    "api_key=secret-v1",
+                ]
+            );
+        }
     }
 
     fn on_cli_parser_stack(test: impl FnOnce() + Send + 'static) {
@@ -6052,7 +6057,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_privacy_upsert_with_key_dynamic_flag() {
+    fn cli_parses_privacy_upsert_with_field_dynamic_flag() {
         on_cli_parser_stack(|| {
             let cli = Cli::parse_from(preprocess_privacy_args(vec![
                 OsString::from("ov"),
@@ -6060,7 +6065,7 @@ mod tests {
                 OsString::from("upsert"),
                 OsString::from("skill"),
                 OsString::from("demo"),
-                OsString::from("--key-api_key"),
+                OsString::from("--field-api_key"),
                 OsString::from("secret-v2"),
             ]));
 
@@ -6069,16 +6074,37 @@ mod tests {
                     PrivacyCommands::Upsert {
                         category,
                         target_key,
-                        key,
+                        field,
                         ..
                     } => {
                         assert_eq!(category, "skill");
                         assert_eq!(target_key, "demo");
-                        assert_eq!(key, vec!["api_key=secret-v2"]);
+                        assert_eq!(field, vec!["api_key=secret-v2"]);
                     }
                     _ => panic!("expected privacy upsert"),
                 },
                 _ => panic!("expected privacy command"),
+            }
+
+            for flag in ["--field", "--key"] {
+                let cli = Cli::parse_from(preprocess_privacy_args(vec![
+                    OsString::from("ov"),
+                    OsString::from("privacy"),
+                    OsString::from("upsert"),
+                    OsString::from("skill"),
+                    OsString::from("demo"),
+                    OsString::from(flag),
+                    OsString::from("api_key=secret-v3"),
+                ]));
+                match cli.command {
+                    Commands::Privacy { action } => match *action {
+                        PrivacyCommands::Upsert { field, .. } => {
+                            assert_eq!(field, vec!["api_key=secret-v3"]);
+                        }
+                        _ => panic!("expected privacy upsert"),
+                    },
+                    _ => panic!("expected privacy command"),
+                }
             }
         });
     }
@@ -6106,7 +6132,7 @@ mod tests {
                             assert_eq!(subcommand, "reference");
                             assert_eq!(category, "credential");
                             assert_eq!(target_key, "github-prod");
-                            assert_eq!(field, expected_field);
+                            assert_eq!(field.as_deref(), Some(expected_field));
                         }
                         PrivacyCommands::Resolve {
                             selector_or_category,
@@ -6117,6 +6143,34 @@ mod tests {
                             assert_eq!(selector_or_category, "credential");
                             assert_eq!(target_key.as_deref(), Some("github-prod"));
                             assert_eq!(field.as_deref(), Some(expected_field));
+                        }
+                        _ => panic!("expected privacy field command"),
+                    },
+                    _ => panic!("expected privacy command"),
+                }
+            }
+
+            for subcommand in ["reference", "resolve"] {
+                let cli = Cli::parse_from(preprocess_privacy_args(vec![
+                    OsString::from("ov"),
+                    OsString::from("privacy"),
+                    OsString::from(subcommand),
+                    OsString::from("credential"),
+                    OsString::from("github-prod"),
+                ]));
+
+                match cli.command {
+                    Commands::Privacy { action } => match *action {
+                        PrivacyCommands::Reference { field, .. } => {
+                            assert_eq!(subcommand, "reference");
+                            assert!(field.is_none());
+                        }
+                        PrivacyCommands::Resolve {
+                            target_key, field, ..
+                        } => {
+                            assert_eq!(subcommand, "resolve");
+                            assert_eq!(target_key.as_deref(), Some("github-prod"));
+                            assert!(field.is_none());
                         }
                         _ => panic!("expected privacy field command"),
                     },

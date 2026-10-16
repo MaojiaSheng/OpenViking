@@ -783,12 +783,16 @@ const COMMAND_HELP_SPECS: &[CommandHelpSpec] = &[
                 description: "Show active values for one target.",
             },
             HelpItem {
-                label: "ov privacy reference <category> <target> <field>",
-                description: "Show the owner-bound reference without revealing the value.",
+                label: "ov privacy reference <category> <target> [field]",
+                description: "Show a reference; infer the field only when exactly one exists.",
             },
             HelpItem {
-                label: "ov privacy resolve <reference-or-field-uri>",
-                description: "Explicitly reveal the referenced active field value.",
+                label: "ov privacy resolve <category> <target> [field]",
+                description: "Reveal a field; infer it only when exactly one exists.",
+            },
+            HelpItem {
+                label: "ov privacy upsert <category> <target> --field-<name> <value>",
+                description: "Update one field; --key and --key-<name> remain compatible.",
             },
             HelpItem {
                 label: "ov privacy scan --scope resources,skills,memories",

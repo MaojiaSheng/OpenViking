@@ -1755,6 +1755,15 @@ impl HttpClient {
         self.get(&path, &params).await
     }
 
+    pub async fn privacy_list_fields(
+        &self,
+        category: &str,
+        target_key: &str,
+    ) -> Result<serde_json::Value> {
+        let path = format!("/api/v1/privacy-configs/{}/{}/fields", category, target_key);
+        self.get(&path, &[]).await
+    }
+
     pub async fn privacy_resolve_selector(
         &self,
         selector: &str,
@@ -1774,6 +1783,16 @@ impl HttpClient {
     ) -> Result<serde_json::Value> {
         let path = format!("/api/v1/privacy-configs/{}/{}", category, target_key);
         self.post(&path, body).await
+    }
+
+    pub async fn privacy_patch(
+        &self,
+        category: &str,
+        target_key: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let path = format!("/api/v1/privacy-configs/{}/{}", category, target_key);
+        self.patch(&path, body, &[]).await
     }
 
     pub async fn privacy_list_versions(

@@ -16,9 +16,11 @@ Activating a version changes only the values stored in OpenViking. It does not r
 | POST | `/api/v1/privacy-configs/scan` | Scan or repair registered values in stored content |
 | GET | `/api/v1/privacy-configs/{category}` | List targets under a category |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | Get active config (`meta + current`) |
+| GET | `/api/v1/privacy-configs/{category}/{target_key}/fields` | List safe active-field metadata without values |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/field` | Get a field reference; optionally reveal its value |
 | POST | `/api/v1/privacy-configs/resolve` | Explicitly reveal a field by reference or URI |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | Upsert and activate a new/current version |
+| PATCH | `/api/v1/privacy-configs/{category}/{target_key}` | Atomically merge fields; create a missing target |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | Delete a target and every version |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | Remove a field from the active config |
 | DELETE | `/api/v1/privacy-configs/selector` | Delete by target URI or field reference/URI |
@@ -95,6 +97,23 @@ Use either `scopes` or `target_uri`. When one value maps to multiple Privacy fie
   }
 }
 ```
+
+### Input format and capacity limits
+
+The server applies the same validation to HTTP, CLI, Embedded, and internal writes:
+
+| Item | Limit |
+|------|------|
+| `category` / `target_key` | Non-empty, at most 255 ASCII characters; only letters, digits, `_`, `-`, `.`, and `@`; `.` and `..` are forbidden and at most one `@` is allowed |
+| Top-level values fields | At most 128 |
+| Field name | Non-empty, at most 255 UTF-8 bytes, no control characters |
+| Individual string | At most 64 KiB UTF-8 |
+| Serialized values | At most 1 MiB |
+| JSON nesting | At most 16 levels; at most 4096 items in an individual object or array |
+| labels | At most 64 entries and 64 KiB serialized |
+| `change_reason` | At most 1024 characters |
+
+Violations return `INVALID_ARGUMENT`. Error `details` identify the field, reason, actual size, and limit without including the sensitive value itself.
 
 ---
 
@@ -193,6 +212,35 @@ curl -X GET "http://localhost:1933/api/v1/privacy-configs/skill/byted-viking-sea
 ```
 
 > Returns `NOT_FOUND` if the target does not exist.
+
+---
+
+### list_privacy_fields()
+
+List active field names, configuration status, and owner-bound references without returning plaintext values. The CLI uses this endpoint when `reference` or the category form of `resolve` omits the field. It infers the field only when exactly one exists; multiple fields are listed to the user and require an explicit choice.
+
+```text
+GET /api/v1/privacy-configs/{category}/{target_key}/fields
+```
+
+```json
+{
+  "status": "ok",
+  "result": {
+    "owner_user_id": "alice",
+    "category": "credential",
+    "target_key": "github-prod",
+    "version": 1,
+    "fields": [
+      {
+        "field": "pat",
+        "configured": true,
+        "reference": "{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/pat}}"
+      }
+    ]
+  }
+}
+```
 
 ---
 
@@ -295,6 +343,29 @@ curl -X POST "http://localhost:1933/api/v1/privacy-configs/skill/byted-viking-se
     "change_reason": "rotate key"
   }
 }
+```
+
+---
+
+### patch_privacy_config()
+
+Merge `values` into the current configuration while holding the server-side target lock. A missing target starts from an empty object and creates version 1. An existing target keeps untouched fields and creates a new version. Read, merge, and write happen under the same lock, so concurrent updates to distinct fields do not suffer from client-side read-modify-write loss.
+
+```text
+PATCH /api/v1/privacy-configs/{category}/{target_key}
+```
+
+```json
+{
+  "values": {"pat": "github_pat_..."},
+  "change_reason": "configure GitHub PAT"
+}
+```
+
+Canonical CLI `--field` and `--field-*` flags use this endpoint without reading current values in the CLI. `--key` and `--key-*` remain backward-compatible aliases:
+
+```bash
+ov privacy upsert credential github --field-pat 'github_pat_...'
 ```
 
 ---
@@ -455,10 +526,13 @@ ov privacy list skill
 ov privacy get skill byted-viking-search-knowledgebase
 ov privacy skill byted-viking-search-knowledgebase
 
-# Get the owner-bound reference without returning the value
+# Get the owner-bound reference without returning the value.
+# The field may be omitted only when the target has exactly one field.
+ov privacy reference credential github-prod
 ov privacy reference credential github-prod api_key
 
-# Explicitly reveal one field in the active version
+# Explicitly reveal one field in the active version (same inference rule)
+ov privacy resolve credential github-prod
 ov privacy resolve credential github-prod api_key
 ov privacy resolve '{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}'
 ov privacy resolve 'viking://~/privacy/credential/github-prod#/values/api_key'
@@ -470,9 +544,9 @@ ov privacy upsert skill byted-viking-search-knowledgebase \
 # Read values from a local JSON file instead of command arguments
 ov privacy upsert skill byted-viking-search-knowledgebase --values-file ./privacy-values.json
 
-# Partial key update (CLI merges with current first)
+# Update one field; creates a missing target, otherwise merges atomically on the server
 ov privacy upsert skill byted-viking-search-knowledgebase \
-  --key-api_key secret-3
+  --field-api_key secret-3
 
 # Version query and activation
 ov privacy versions skill byted-viking-search-knowledgebase

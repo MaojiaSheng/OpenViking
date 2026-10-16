@@ -523,6 +523,7 @@ JSON 输出 - 错误：
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions` | 列出配置版本 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions/{version}` | 获取指定版本 |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | 写入并激活新版本 |
+| PATCH | `/api/v1/privacy-configs/{category}/{target_key}` | 原子合并字段；不存在时创建 |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}/activate` | 激活指定版本 |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | 删除目标及全部版本 |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | 删除当前字段 |
