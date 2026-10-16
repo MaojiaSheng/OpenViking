@@ -523,6 +523,7 @@ This catalog follows the routes actually mounted by the server. Each group headi
 | POST | `/api/v1/privacy-configs/scan` | Scan or repair registered values in content |
 | GET | `/api/v1/privacy-configs/{category}` | List category targets |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | Get the active configuration |
+| GET | `/api/v1/privacy-configs/{category}/{target_key}/fields` | List safe active-field metadata without values |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/field` | Get a field reference or explicitly reveal its value |
 | POST | `/api/v1/privacy-configs/resolve` | Explicitly reveal a field by reference or URI |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions` | List configuration versions |

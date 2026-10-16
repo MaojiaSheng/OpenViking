@@ -19,12 +19,9 @@ from openviking.core.namespace import (
     uri_leaf_name,
     uri_parts,
 )
-from openviking.privacy import (
-    PrivacySanitizer,
-    UserPrivacyConfigService,
-    get_skill_name_from_uri,
-    restore_skill_content,
-)
+from openviking.privacy.sanitizer import PrivacySanitizer
+from openviking.privacy.service import UserPrivacyConfigService
+from openviking.privacy.skill_restore import get_skill_name_from_uri, restore_skill_content
 from openviking.resource.uri_mutation_coordinator import UriMutationCoordinator
 from openviking.resource.watch_storage import is_watch_task_control_uri
 from openviking.server.identity import RequestContext
@@ -57,6 +54,7 @@ from openviking_cli.exceptions import (
     InvalidArgumentError,
     NotFoundError,
     NotInitializedError,
+    ResourceExhaustedError,
 )
 from openviking_cli.utils import VikingURI, get_logger
 from openviking_cli.utils.config import get_openviking_config
@@ -104,11 +102,12 @@ class FSService:
         resource_memory_link_service: Optional["ResourceMemoryLinkService"] = None,
         watch_scheduler: Optional["WatchScheduler"] = None,
         uri_mutation_coordinator: Optional[UriMutationCoordinator] = None,
+        privacy_sanitizer: Optional[PrivacySanitizer] = None,
     ):
         self._viking_fs = viking_fs
         self._vikingdb = vikingdb
         self._privacy_config_service = privacy_config_service
-        self._privacy_sanitizer = (
+        self._privacy_sanitizer = privacy_sanitizer or (
             PrivacySanitizer(privacy_config_service) if privacy_config_service is not None else None
         )
         self._resource_memory_link_service = resource_memory_link_service
@@ -123,12 +122,13 @@ class FSService:
         resource_memory_link_service: Optional["ResourceMemoryLinkService"] = None,
         watch_scheduler: Optional["WatchScheduler"] = None,
         uri_mutation_coordinator: Optional[UriMutationCoordinator] = None,
+        privacy_sanitizer: Optional[PrivacySanitizer] = None,
     ) -> None:
         """Set service dependencies (for deferred initialization)."""
         self._viking_fs = viking_fs
         self._vikingdb = vikingdb
         self._privacy_config_service = privacy_config_service
-        self._privacy_sanitizer = (
+        self._privacy_sanitizer = privacy_sanitizer or (
             PrivacySanitizer(privacy_config_service) if privacy_config_service is not None else None
         )
         self._resource_memory_link_service = resource_memory_link_service
@@ -1123,6 +1123,23 @@ class FSService:
         # Resolve id to URI before classify_uri / visible_content which expect
         # a real viking:// URI.
         resolved_uri = await self._resolve_uri(uri, ctx)
+        if self._privacy_sanitizer is not None:
+            stat = await self._ensure_initialized().stat(
+                resolved_uri,
+                ctx=ctx,
+                skip_count=True,
+            )
+            size = stat.get("size") if isinstance(stat, dict) else None
+            if isinstance(size, int) and size > self._privacy_sanitizer.max_content_bytes:
+                raise ResourceExhaustedError(
+                    "File exceeds the Privacy visible-read size limit",
+                    details={
+                        "uri": resolved_uri,
+                        "reason": "privacy_visible_read_limit_exceeded",
+                        "size_bytes": size,
+                        "max_bytes": self._privacy_sanitizer.max_content_bytes,
+                    },
+                )
         content = await self.read(resolved_uri, ctx=ctx)
         if classify_uri(resolved_uri).is_memory:
             content = visible_content(content, uri=resolved_uri)

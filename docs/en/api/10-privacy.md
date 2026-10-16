@@ -17,12 +17,12 @@ Activating a version changes only the values stored in OpenViking. It does not r
 | GET | `/api/v1/privacy-configs/{category}` | List targets under a category |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | Get active config (`meta + current`) |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/fields` | List safe active-field metadata without values |
-| GET | `/api/v1/privacy-configs/{category}/{target_key}/field` | Get a field reference; optionally reveal its value |
+| GET | `/api/v1/privacy-configs/{category}/{target_key}/field?field={field}` | Get a field reference; optionally reveal its value |
 | POST | `/api/v1/privacy-configs/resolve` | Explicitly reveal a field by reference or URI |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | Upsert and activate a new/current version |
 | PATCH | `/api/v1/privacy-configs/{category}/{target_key}` | Atomically merge fields; create a missing target |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | Delete a target and every version |
-| DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | Remove a field from the active config |
+| DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field?field={field}` | Remove a field from the active config |
 | DELETE | `/api/v1/privacy-configs/selector` | Delete by target URI or field reference/URI |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions` | List version numbers |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions/{version}` | Get a specific version snapshot |

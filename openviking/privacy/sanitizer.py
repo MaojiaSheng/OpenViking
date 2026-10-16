@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from openviking.privacy.reference import build_privacy_field_reference
 from openviking.pyagfs import get_privacy_matcher_class
 from openviking.server.identity import RequestContext
+from openviking_cli.exceptions import ResourceExhaustedError
 
 if TYPE_CHECKING:
     from openviking.privacy.service import UserPrivacyConfigService
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
 _AMBIGUOUS_PLACEHOLDER = "{{ov_privacy:ambiguous}}"
 MIN_PROTECTED_VALUE_CHARS = 6
 DEFAULT_MATCHER_CACHE_TTL_SECONDS = 3600.0
+DEFAULT_SANITIZER_MAX_CONTENT_BYTES = 16 * 1024 * 1024
+DEFAULT_SANITIZER_MAX_REPLACEMENTS = 10000
 
 
 @dataclass(frozen=True)
@@ -48,17 +51,30 @@ class PrivacySanitizer:
         privacy: "UserPrivacyConfigService",
         *,
         cache_ttl_seconds: float = DEFAULT_MATCHER_CACHE_TTL_SECONDS,
+        max_content_bytes: int = DEFAULT_SANITIZER_MAX_CONTENT_BYTES,
+        max_replacements: int = DEFAULT_SANITIZER_MAX_REPLACEMENTS,
         monotonic_clock: Callable[[], float] = time.monotonic,
     ):
         if cache_ttl_seconds <= 0:
             raise ValueError("cache_ttl_seconds must be positive")
+        if max_content_bytes <= 0:
+            raise ValueError("max_content_bytes must be positive")
+        if max_replacements <= 0:
+            raise ValueError("max_replacements must be positive")
         self._privacy = privacy
         self._cache_ttl_seconds = float(cache_ttl_seconds)
+        self._max_content_bytes = int(max_content_bytes)
+        self._max_replacements = int(max_replacements)
         self._monotonic_clock = monotonic_clock
         matcher_class: Any = get_privacy_matcher_class()
         self._matcher_class = matcher_class
         self._cache: dict[tuple[str, str, int], tuple[float, Any]] = {}
         self._cache_lock = asyncio.Lock()
+
+    @property
+    def max_content_bytes(self) -> int:
+        """Maximum UTF-8 input size accepted by this sanitizer."""
+        return self._max_content_bytes
 
     async def sanitize(
         self,
@@ -67,22 +83,40 @@ class PrivacySanitizer:
         ctx: RequestContext,
         uri: str = "",
         max_replacements: int | None = None,
+        fail_on_match_limit: bool = True,
     ) -> PrivacySanitizationResult:
         if not content or self._is_privacy_storage_uri(uri, ctx):
             return PrivacySanitizationResult(content=content)
+        content_bytes = len(content.encode("utf-8"))
+        if content_bytes > self._max_content_bytes:
+            raise ResourceExhaustedError(
+                "Content exceeds the Privacy sanitizer size limit",
+                details={
+                    "uri": uri,
+                    "size_bytes": content_bytes,
+                    "max_bytes": self._max_content_bytes,
+                },
+            )
         matcher = await self._matcher(ctx)
-        match_limit_exceeded = False
-        if max_replacements is None:
-            rewritten, raw_replacements, raw_ambiguous = matcher.sanitize(content)
-        else:
-            if max_replacements < 0:
-                raise ValueError("max_replacements must be non-negative")
-            (
-                rewritten,
-                raw_replacements,
-                raw_ambiguous,
-                match_limit_exceeded,
-            ) = matcher.sanitize_limited(content, max_replacements)
+        effective_max_replacements = (
+            self._max_replacements if max_replacements is None else max_replacements
+        )
+        if effective_max_replacements <= 0:
+            raise ValueError("max_replacements must be positive")
+        (
+            rewritten,
+            raw_replacements,
+            raw_ambiguous,
+            match_limit_exceeded,
+        ) = matcher.sanitize_limited(content, effective_max_replacements)
+        if match_limit_exceeded and fail_on_match_limit:
+            raise ResourceExhaustedError(
+                "Content exceeds the Privacy sanitizer replacement limit",
+                details={
+                    "uri": uri,
+                    "max_replacements": effective_max_replacements,
+                },
+            )
         replacements = tuple(
             PrivacyReplacement(start=start, end=end, reference=reference)
             for start, end, reference in raw_replacements
@@ -103,6 +137,11 @@ class PrivacySanitizer:
             return cached[1]
         async with self._cache_lock:
             now = self._monotonic_clock()
+            self._cache = {
+                key: item
+                for key, item in self._cache.items()
+                if now - item[0] < self._cache_ttl_seconds
+            }
             cached = self._cache.get(cache_key)
             if cached is not None and now - cached[0] < self._cache_ttl_seconds:
                 return cached[1]

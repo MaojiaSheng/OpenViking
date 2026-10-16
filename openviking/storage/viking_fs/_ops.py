@@ -2103,16 +2103,26 @@ class _OpsMixin:
             size = stat.get("size") if isinstance(stat, dict) else None
             if isinstance(size, int) and size > max_bytes:
                 raise ResourceExhaustedError(
-                    "File exceeds the Privacy scan size limit",
-                    details={"uri": uri, "size_bytes": size, "max_bytes": max_bytes},
+                    "File exceeds the configured read size limit",
+                    details={
+                        "uri": uri,
+                        "reason": "read_limit_exceeded",
+                        "size_bytes": size,
+                        "max_bytes": max_bytes,
+                    },
                 )
         try:
             read_size = -1 if max_bytes is None else max_bytes + 1
             raw = self._handle_agfs_read(await self._async_agfs.read(path, size=read_size))
             if max_bytes is not None and len(raw) > max_bytes:
                 raise ResourceExhaustedError(
-                    "File exceeds the Privacy scan size limit",
-                    details={"uri": uri, "size_bytes": len(raw), "max_bytes": max_bytes},
+                    "File exceeds the configured read size limit",
+                    details={
+                        "uri": uri,
+                        "reason": "read_limit_exceeded",
+                        "size_bytes": len(raw),
+                        "max_bytes": max_bytes,
+                    },
                 )
             return raw
         except Exception as exc:

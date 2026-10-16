@@ -3,6 +3,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from openviking.privacy.reference import (
     PrivacyFieldReference,
     build_privacy_field_reference,
@@ -12,6 +14,7 @@ from openviking.privacy.reference import (
 )
 from openviking.privacy.sanitizer import PrivacySanitizer
 from openviking.server.identity import RequestContext, Role
+from openviking_cli.exceptions import ResourceExhaustedError
 from openviking_cli.session.user_id import UserIdentifier
 
 
@@ -151,11 +154,24 @@ async def test_sanitizer_bounds_dense_match_metadata_for_scans():
         "secret secret secret",
         ctx=_ctx(),
         max_replacements=2,
+        fail_on_match_limit=False,
     )
 
     assert result.match_limit_exceeded
     assert result.content == "secret secret secret"
     assert not result.replacements
+
+
+async def test_sanitizer_rejects_oversized_or_excessively_dense_writes():
+    catalog = _PrivacyCatalog({"credential": {"service": {"key": "secret"}}})
+
+    size_limited = PrivacySanitizer(catalog, max_content_bytes=5)
+    with pytest.raises(ResourceExhaustedError, match="size limit"):
+        await size_limited.sanitize("secret", ctx=_ctx())
+
+    match_limited = PrivacySanitizer(catalog, max_replacements=2)
+    with pytest.raises(ResourceExhaustedError, match="replacement limit"):
+        await match_limited.sanitize("secret secret secret", ctx=_ctx())
 
 
 async def test_sanitizer_cache_rebuilds_only_after_catalog_revision_changes():

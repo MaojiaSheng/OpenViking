@@ -33,10 +33,6 @@ name = "dynamic_provider"
 path = "tests/dynamic_provider.rs"
 required-features = ["cache"]
 
-[[bench]]
-name = "privacy_matcher"
-harness = false
-
 [dependencies]
 # Async runtime
 tokio = { version = "1.38", features = ["full"] }

@@ -59,6 +59,17 @@ if TYPE_CHECKING:
     from openviking.parse.vlm import VLMProcessor
 
 logger = get_logger(__name__)
+
+_PARSE_ARTIFACT_INTERNAL_NAMES = frozenset(
+    {
+        ".abstract.md",
+        ".overview.md",
+        ".relations.json",
+        ".source.json",
+        ".image_mappings.json",
+        ".artifact_manifest.json",
+    }
+)
 _MAX_FILE_VECTORIZATION_CONCURRENCY = 64
 VECTORDB_MAX_QUERY_LIMIT = 100_000
 
@@ -178,7 +189,9 @@ class ResourceProcessor:
                 if entry.is_dir:
                     await walk(entry.rel_path)
                     continue
-                if entry.name.startswith("."):
+                if entry.name in _PARSE_ARTIFACT_INTERNAL_NAMES or is_storage_internal_name(
+                    entry.name
+                ):
                     continue
                 relative = (
                     entry.rel_path[len(prefix) :]

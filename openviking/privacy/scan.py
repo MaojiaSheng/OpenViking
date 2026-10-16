@@ -196,7 +196,9 @@ async def _scan_privacy_content(
                 max_bytes=PRIVACY_SCAN_MAX_FILE_BYTES,
             )
             last_read_at = time.monotonic()
-        except ResourceExhaustedError:
+        except ResourceExhaustedError as exc:
+            if exc.details.get("reason") != "read_limit_exceeded":
+                raise
             skip("file_too_large")
             continue
         except (NotFoundError, FileNotFoundError):
@@ -219,6 +221,7 @@ async def _scan_privacy_content(
             ctx=ctx,
             uri=file_uri,
             max_replacements=PRIVACY_SCAN_MAX_REPLACEMENTS_PER_FILE,
+            fail_on_match_limit=False,
         )
         if result.match_limit_exceeded:
             skip("match_limit_exceeded")

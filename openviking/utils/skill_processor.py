@@ -21,11 +21,9 @@ from openviking.config.vlm import VLMHandle, VLMResolver
 from openviking.core.mcp_converter import is_mcp_format, mcp_to_skill
 from openviking.core.namespace import canonical_user_root
 from openviking.core.skill_loader import SkillLoader
-from openviking.privacy import (
-    PrivacySanitizer,
-    UserPrivacyConfigService,
-    extract_skill_privacy_values,
-)
+from openviking.privacy.sanitizer import PrivacySanitizer
+from openviking.privacy.service import UserPrivacyConfigService
+from openviking.privacy.skill_extractor import extract_skill_privacy_values
 from openviking.server.identity import RequestContext
 from openviking.server.local_input_guard import deny_direct_local_skill_input
 from openviking.service.task_tracker_concurrency import run_to_completion
@@ -104,6 +102,7 @@ class SkillProcessor:
         vikingdb: VikingDBManager,
         privacy_config_service: Optional[UserPrivacyConfigService] = None,
         vlm_resolver: Optional[VLMResolver] = None,
+        privacy_sanitizer: Optional[PrivacySanitizer] = None,
     ):
         """Initialize skill processor."""
         if privacy_config_service is not None and vlm_resolver is None:
@@ -112,7 +111,7 @@ class SkillProcessor:
             )
         self.vikingdb = vikingdb
         self._privacy_config_service = privacy_config_service
-        self._privacy_sanitizer = (
+        self._privacy_sanitizer = privacy_sanitizer or (
             PrivacySanitizer(privacy_config_service)
             if isinstance(privacy_config_service, UserPrivacyConfigService)
             else None
@@ -489,23 +488,31 @@ class SkillProcessor:
         if not self._privacy_config_service:
             return skill_dict, {}
 
+        skill_uri = (
+            f"{canonical_user_root(ctx)}/skills/"
+            f"{skill_dict.get('name', '')}/SKILL.md"
+        )
         content = skill_dict.get("content", "")
         sanitized_by_catalog = await self._sanitize_registered_privacy(
             content,
             ctx=ctx,
-            uri=(
-                f"{canonical_user_root(ctx)}/skills/"
-                f"{skill_dict.get('name', '')}/SKILL.md"
-            ),
+            uri=skill_uri,
+        )
+        description = skill_dict.get("description", "")
+        sanitized_description = await self._sanitize_registered_privacy(
+            description,
+            ctx=ctx,
+            uri=skill_uri,
         )
         prepared_skill = skill_dict
-        if sanitized_by_catalog != content:
+        if sanitized_by_catalog != content or sanitized_description != description:
             prepared_skill = deepcopy(skill_dict)
             prepared_skill["content"] = sanitized_by_catalog
+            prepared_skill["description"] = sanitized_description
         content = sanitized_by_catalog
         extraction_kwargs = {
-            "skill_name": skill_dict.get("name", ""),
-            "skill_description": skill_dict.get("description", ""),
+            "skill_name": prepared_skill.get("name", ""),
+            "skill_description": prepared_skill.get("description", ""),
             "content": content,
         }
         if self._vlm_resolver is None:

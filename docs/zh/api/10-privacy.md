@@ -26,12 +26,12 @@
 | GET | `/api/v1/privacy-configs/{category}` | 列出分类下目标 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | 获取当前生效配置（meta + current） |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/fields` | 列出不含明文值的安全字段元数据 |
-| GET | `/api/v1/privacy-configs/{category}/{target_key}/field` | 获取单字段引用；显式选择时返回值 |
+| GET | `/api/v1/privacy-configs/{category}/{target_key}/field?field={field}` | 获取单字段引用；显式选择时返回值 |
 | POST | `/api/v1/privacy-configs/resolve` | 按字段 reference/URI 显式读取值 |
 | POST | `/api/v1/privacy-configs/{category}/{target_key}` | 写入新版本并激活 |
 | PATCH | `/api/v1/privacy-configs/{category}/{target_key}` | 原子合并字段；目标不存在时创建 |
 | DELETE | `/api/v1/privacy-configs/{category}/{target_key}` | 删除目标及全部版本 |
-| DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field` | 删除当前生效配置中的字段 |
+| DELETE | `/api/v1/privacy-configs/{category}/{target_key}/field?field={field}` | 删除当前生效配置中的字段 |
 | DELETE | `/api/v1/privacy-configs/selector` | 按 target URI 或字段 reference/URI 删除 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions` | 列出版本号 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}/versions/{version}` | 获取指定版本详情 |

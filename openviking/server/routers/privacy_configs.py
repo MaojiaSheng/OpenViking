@@ -100,7 +100,7 @@ async def scan_privacy_configs(
     result = await scan_privacy_content(
         service=service,
         ctx=_ctx,
-        sanitizer=PrivacySanitizer(privacy),
+        sanitizer=service.privacy_sanitizer or PrivacySanitizer(privacy),
         uri=request.uri,
         fix=request.fix,
         node_limit=request.node_limit,

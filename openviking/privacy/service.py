@@ -184,7 +184,7 @@ class UserPrivacyConfigService:
 
     async def get_current(
         self, ctx: RequestContext, category: str, target_key: str
-    ) -> Optional[UserPrivacyFieldDeleteResult]:
+    ) -> Optional[UserPrivacyConfigVersion]:
         try:
             content = await self._viking_fs.read_file(
                 current_uri(self._user_space(ctx), category, target_key), ctx=ctx

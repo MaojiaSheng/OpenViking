@@ -55,11 +55,20 @@ class _VikingFS:
 
 
 class _Sanitizer:
-    async def sanitize(self, content, *, ctx, uri, max_replacements):  # noqa: ANN001
+    async def sanitize(  # noqa: ANN001
+        self,
+        content,
+        *,
+        ctx,
+        uri,
+        max_replacements,
+        fail_on_match_limit,
+    ):
         del ctx
         assert content == "prefix secret"
         assert uri == "viking://resources/demo/content.md"
         assert max_replacements == privacy_scan.PRIVACY_SCAN_MAX_REPLACEMENTS_PER_FILE
+        assert fail_on_match_limit is False
         return PrivacySanitizationResult(
             content="prefix reference",
             replacements=(PrivacyReplacement(7, 13, "reference"),),
