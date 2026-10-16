@@ -13,6 +13,7 @@ import {
   DialogFooter,
 } from '#/components/ui/dialog'
 import { getAccess, toGatewayError } from '../-lib/api'
+import { gatewayDocsUrl } from '../-lib/client-guides'
 import {
   MANAGEMENT_UNLOCK_EVENT,
   setManagementKey,
@@ -27,7 +28,7 @@ const MANAGEMENT_CONFIGS = [
 ]
 
 export function ManagementKeyDialog() {
-  const { t } = useTranslation('gateway')
+  const { t, i18n } = useTranslation('gateway')
   const { connection } = useGateway()
   const [open, setOpen] = React.useState(false)
   const [key, setKey] = React.useState('')
@@ -91,7 +92,19 @@ export function ManagementKeyDialog() {
                 {t('management.environment')}{' '}
                 <code>OPENVIKING_GATEWAY_MANAGEMENT_KEY</code>
               </li>
+              <li>{t('management.studio')}</li>
               <li>{t('management.prefix')}</li>
+              <li>
+                {t('management.reset')}{' '}
+                <a
+                  href={gatewayDocsUrl('operations', i18n.resolvedLanguage)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-foreground underline underline-offset-4"
+                >
+                  {t('management.resetDocs')}
+                </a>
+              </li>
             </ul>
           </details>
           <SettingField

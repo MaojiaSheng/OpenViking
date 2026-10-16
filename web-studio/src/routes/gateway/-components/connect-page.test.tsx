@@ -85,6 +85,7 @@ function upstream(overrides: Partial<Upstream>): Upstream {
     base_url: 'https://api.example.com/v1',
     append_endpoint_path: true,
     auth_mode: 'managed',
+    key_header: 'authorization',
     models: [],
     aliases: {},
     priority: 0,

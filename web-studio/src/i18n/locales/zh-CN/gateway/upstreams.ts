@@ -19,8 +19,6 @@ const upstreams = {
       invalid_configuration: '模型配置无效，请检查服务端配置后重新导入。',
       openai_codex:
         'Codex 的 OAuth 凭证会定期刷新，网关无法长期使用。请手动添加上游。',
-      azure:
-        'Azure OpenAI 需要 api-version 参数，网关暂不支持。请手动添加上游。',
       litellm_no_api_base:
         '这个 LiteLLM 凭证没有填写 api_base，网关无法确定地址。请在服务端配置里补上 api_base 后重新导入。',
       litellm_unsupported_route:
@@ -113,6 +111,7 @@ const upstreams = {
         '先检查已保存配置的连接，再发送一次最小的非流式生成请求测试所选模型。',
       connection: '上游连接',
       checkingConnection: '正在检查连接…',
+      exactEndpoint: '完整请求地址没有模型列表可检查，请直接测试模型。',
       model: '模型',
       modelPlaceholder: '输入服务商模型名',
       configuredModel: '可选择已配置的模型，也可以输入其他模型名。',
@@ -202,7 +201,7 @@ const upstreams = {
     baseUrl: {
       label: 'Base URL',
       description:
-        '照服务商 SDK 文档填写 base_url，网关在后面拼接 /chat/completions、/responses 或 /v1/messages。同一服务商的不同协议地址不同时，请分别添加上游。',
+        '照服务商 SDK 文档填写 base_url，网关在后面拼接 /chat/completions、/responses 或 /v1/messages。同一服务商的不同协议地址不同时，请分别添加上游。地址里可以带查询参数，密钥请写成 {api_key}。',
       preview: '请求将发往',
       missingPath:
         '这个服务商的 base_url 需要带路径，只填域名会请求到错误地址。',
@@ -216,6 +215,13 @@ const upstreams = {
       label: '拼接协议接口路径',
       description:
         '在 Base URL 后拼接所选协议的接口路径。如果 Base URL 已经是完整的请求地址，请关闭此开关。',
+    },
+    keyHeader: {
+      label: '密钥发送方式',
+      authorization: 'Authorization: Bearer',
+      apiKey: 'api-key 请求头（Azure OpenAI）',
+      xApiKey: 'x-api-key 请求头',
+      inUrl: '放在地址里（{api_key}），不发送鉴权请求头',
     },
     authMode: {
       label: 'API Key 由谁提供',

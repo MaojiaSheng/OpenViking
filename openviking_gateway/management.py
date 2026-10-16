@@ -21,7 +21,7 @@ from .client import VikingError
 from .config import MOUNT_PATH
 from .models import CaptureReset, KeyRequest, Policy, Upstream, UpstreamTestRequest
 from .protocols import text_content
-from .proxy import upstream_headers, upstream_url
+from .proxy import fill_key, upstream_headers, upstream_key, upstream_url
 from .records import RecordKind as K
 from .storage import delete_account_data, delete_user_data, digest
 from .tool_catalog import select_tools
@@ -30,7 +30,16 @@ from .tool_protocols import ResponseCapture, tool_protocol
 PREFIX = "/admin"
 MANAGEMENT_HEADER = "x-openviking-gateway-management-key"
 # Fields a VLM re-import refreshes; everything else may have been edited in the gateway.
-VLM_SOURCE_FIELDS = ("base_url", "api_key", "headers", "protocol", "vendor", "coding_plan")
+VLM_SOURCE_FIELDS = (
+    "base_url",
+    "api_key",
+    "headers",
+    "protocol",
+    "vendor",
+    "coding_plan",
+    "append_endpoint_path",
+    "key_header",
+)
 UPSTREAM_TEST_PATHS = {
     "anthropic": "/v1/messages",
     "chat": "/v1/chat/completions",
@@ -461,12 +470,17 @@ def register_management(app):
         assert data is not None
         generating = data.model is not None
         kind = "model" if generating else "connection"
+        if not generating and not upstream.get("append_endpoint_path", True):
+            # An exact endpoint has no model list; only a generation test can reach it.
+            url = upstream_url(upstream, UPSTREAM_TEST_PATHS[upstream["protocol"]])
+            return {"ok": False, "reason": "exact_endpoint_untestable", "url": url, "kind": kind}
         path = UPSTREAM_TEST_PATHS[upstream["protocol"]] if generating else "/v1/models"
         url = upstream_url(upstream, path)
         if generating and upstream.get("coding_plan") and not upstream.get("allow_coding_plan"):
             return {"ok": False, "reason": "coding_plan_blocked", "url": url, "kind": kind}
         try:
             headers = upstream_headers(upstream, {})
+            target = fill_key(url, upstream_key(upstream, {}))
         except HTTPException as error:
             if error.status_code != 401:
                 raise
@@ -491,7 +505,7 @@ def register_management(app):
         try:
             async with app.state.http.request(
                 "POST" if generating else "GET",
-                url,
+                target,
                 data=orjson.dumps(payload) if payload is not None else None,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(
@@ -502,9 +516,7 @@ def register_management(app):
                 status = response.status
                 raw = bytearray()
                 while len(raw) <= UPSTREAM_TEST_RESPONSE_LIMIT:
-                    chunk = await response.content.read(
-                        UPSTREAM_TEST_RESPONSE_LIMIT + 1 - len(raw)
-                    )
+                    chunk = await response.content.read(UPSTREAM_TEST_RESPONSE_LIMIT + 1 - len(raw))
                     if not chunk:
                         break
                     raw.extend(chunk)

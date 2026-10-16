@@ -2455,20 +2455,6 @@ class Session:
                 record_auto_commit_success=record_auto_commit_success,
             )
 
-            # Write .done last so a recovered queue item can skip completed work.
-            await self._write_done_file(
-                archive_uri,
-                first_message_id,
-                last_message_id,
-                enable_working_memory=enable_working_memory,
-                coverage_start_archive=coverage_start_archive,
-                coverage_end_archive=coverage_end_archive,
-                covered_failed_archives=covered_failed_archives,
-                completed_memory_steps=self._archives.serialize_completed_memory_steps(
-                    completed_memory_steps
-                ),
-            )
-
             result_payload = {
                 "session_id": self.session_id,
                 "archive_uri": archive_uri,
@@ -2511,6 +2497,20 @@ class Session:
                 account_id=self.ctx.account_id,
                 user_id=self.ctx.user.user_id,
             )
+            # Write .done last so a recovered queue item can skip completed work.
+            await self._write_done_file(
+                archive_uri,
+                first_message_id,
+                last_message_id,
+                enable_working_memory=enable_working_memory,
+                coverage_start_archive=coverage_start_archive,
+                coverage_end_archive=coverage_end_archive,
+                covered_failed_archives=covered_failed_archives,
+                completed_memory_steps=self._archives.serialize_completed_memory_steps(
+                    completed_memory_steps
+                ),
+            )
+
             logger.info(f"Session {self.session_id} memory extraction completed")
         except asyncio.CancelledError:
             telemetry.set_error("session.commit.phase2", "CANCELLED", "session commit cancelled")

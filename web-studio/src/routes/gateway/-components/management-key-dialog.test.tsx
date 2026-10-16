@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type * as Api from '../-lib/api'
 import { GatewayError } from '../-lib/api'
+import { gatewayDocsUrl } from '../-lib/client-guides'
 import {
   getManagementKey,
   lockManagementKey,
@@ -38,7 +39,10 @@ vi.mock('../-lib/use-gateway', () => ({
   }),
 }))
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) => key,
+    i18n: { resolvedLanguage: 'en' },
+  }),
 }))
 vi.mock('sonner', () => ({
   toast: { success: state.success, error: state.error },
@@ -60,6 +64,17 @@ function open() {
   )
   requestManagementUnlock()
 }
+it('explains where to find a lost key and links to the operations guide', async () => {
+  open()
+  fireEvent.click(await screen.findByText('management.where'))
+  expect(screen.getByText('management.studio')).toBeTruthy()
+  expect(screen.getByText(/management\.reset\b/)).toBeTruthy()
+  expect(
+    screen
+      .getByRole('link', { name: 'management.resetDocs' })
+      .getAttribute('href'),
+  ).toBe(gatewayDocsUrl('operations', 'en'))
+})
 it('rejects client keys in the management field without sending them', async () => {
   open()
   const input = await screen.findByLabelText('management.label')

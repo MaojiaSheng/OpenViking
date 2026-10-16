@@ -46,7 +46,7 @@ from .records import RecordKind as K
 from .state_store import get_state
 from .storage import KernelStore, digest
 from .tool_catalog import reply_block_reason, select_tools, tool_block_reason
-from .tool_protocols import hidden_chain, replay_hidden, tool_protocol
+from .tool_protocols import hidden_chain, replay_hidden, reply_chain, tool_protocol
 from .tool_protocols.common import PREFIX, SummaryError
 from .vendors import parameter_fingerprint
 from .windows import remind, status_line
@@ -636,9 +636,7 @@ class MemoryKernel:
         for text in tool_protocol(request.protocol).unsigned_thinking(output):
             await self.store.state.swap(request.scope, THINKING + digest(text), Document(), {})
         if output and request.kind in {"user", "continuation"}:
-            chain = await asyncio.to_thread(
-                hidden_chain, [*request.messages, *output], request.protocol
-            )
+            chain = reply_chain(request, output)
             request.reply_anchor = chain[-1]
             if response.finished and not request.disabled and replays_reasoning(request.upstream):
                 await self.record_reasoning(request, output, chain)
@@ -656,9 +654,7 @@ class MemoryKernel:
         if not reasoning:
             return
         if visible is not output:
-            chain = await asyncio.to_thread(
-                hidden_chain, [*request.messages, *visible], request.protocol
-            )
+            chain = reply_chain(request, visible)
             # Without its reasoning items the reply ends at another anchor; forks find it there.
             if chain[-1]:
                 await self.store.replay.put(request.scope, request.session, K.REPLY, chain[-1], {})

@@ -17,6 +17,8 @@ export type Vendor =
   | 'ark'
   | 'byteplus'
 export type AuthMode = 'managed' | 'passthrough'
+/** Header the upstream key is sent in. */
+export type KeyHeader = 'authorization' | 'api-key' | 'x-api-key'
 
 /** Sources recall searches, in display order. */
 export const CONTEXT_TYPES = ['memory', 'resource', 'skill'] as const
@@ -61,6 +63,7 @@ type UpstreamSettings = {
   /** Append the selected protocol's endpoint path to base_url. */
   append_endpoint_path: boolean
   auth_mode: AuthMode
+  key_header: KeyHeader
   models: string[]
   /** Name clients use → model sent to the upstream. */
   aliases: Record<string, string>

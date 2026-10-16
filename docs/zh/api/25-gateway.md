@@ -96,11 +96,12 @@ curl -X PUT "$SERVER_URL/gateway/admin/upstreams/openai?account_id=team" \
 
 响应包含 `{ok, kind, status, reason, url}`，其中 `kind` 为 `connection` 或 `model`。测试失败时还会在 `response` 中返回完整的上游 HTTP 响应，包括 `http_version`、`status`、`reason`、`headers`、`body` 和可选的 `truncated` 标记。响应体最多 16 KiB；没有收到响应时不含 `status`。超时时间取已配置上游超时与 60 秒中的较小值。两种测试都需要写权限；模型测试会真实请求服务商并可能产生少量费用。
 
-Anthropic 测试同时在 `x-api-key` 和 `Authorization: Bearer` 中发送密钥；上游请求头未设置 `anthropic-version` 时，默认使用 `2023-06-01`。Chat Completions 和 Responses 测试只发送 Bearer 鉴权。
+Anthropic 测试同时在 `x-api-key` 和 `Authorization: Bearer` 中发送密钥；上游请求头未设置 `anthropic-version` 时，默认使用 `2023-06-01`。Chat Completions 和 Responses 测试只发送 Bearer 鉴权。`key_header` 不是 `authorization`，或者 `base_url` 含 `{api_key}` 时，按[凭证](../guides/22-gateway-operations.md#凭证)中的规则发送；返回的 `url` 保留 `{api_key}` 占位符。
 
 | 服务商的响应 | `reason` | `ok` |
 | --- | --- | --- |
 | Coding Plan 上游尚未授权网关使用。网关不发请求。 | `coding_plan_blocked` | `false` |
+| 对完整请求地址（`append_endpoint_path` 为 `false`）做连接测试：这种上游没有模型列表，网关不发请求，请改用模型测试。 | `exact_endpoint_untestable` | `false` |
 | 没有可用的 API Key：没有保存，或者上游要求每个客户端自带。网关不发请求。 | `upstream_key_missing` | `false` |
 | 2xx，响应符合已配置的模型协议 | `passed` | `true` |
 | 2xx，但响应不是合法 JSON 或不符合已配置的协议 | `invalid_response` | `false` |
@@ -115,7 +116,7 @@ Anthropic 测试同时在 `x-api-key` 和 `Authorization: Bearer` 中发送密�
 
 `POST /gateway/admin/upstreams/import-vlm` 把 OpenViking Server 的 VLM 凭证导入为所选账号的上游，只在嵌入部署中可用；独立网关返回 404 `vlm_import_unavailable`。
 
-每个导入的上游 ID 固定为 `vlm-<credential id>`，重复导入不会产生重复的上游。再次导入时，来自服务端的字段（`base_url`、`api_key`、`headers`、`protocol`、`vendor`、`coding_plan`）按服务端配置刷新，其他字段保留在网关里改过的值，包括 `name`、`enabled`、`priority`、`models`、`aliases`、`context_windows` 和 `allow_coding_plan`。路径中含 `coding` 或 `plan` 段的上游会被标为 Coding Plan，在设置 `allow_coding_plan` 之前归入 `needs_confirmation`。
+每个导入的上游 ID 固定为 `vlm-<credential id>`，重复导入不会产生重复的上游。再次导入时，来自服务端的字段（`base_url`、`api_key`、`headers`、`protocol`、`vendor`、`coding_plan`、`append_endpoint_path`、`key_header`）按服务端配置刷新，其他字段保留在网关里改过的值，包括 `name`、`enabled`、`priority`、`models`、`aliases`、`context_windows` 和 `allow_coding_plan`。路径中含 `coding` 或 `plan` 段的上游会被标为 Coding Plan，在设置 `allow_coding_plan` 之前归入 `needs_confirmation`。
 
 ```json
 {
@@ -128,7 +129,6 @@ Anthropic 测试同时在 `x-api-key` 和 `Authorization: Bearer` 中发送密�
 | 跳过原因 `reason` | 说明 |
 | --- | --- |
 | `openai_codex` | Codex OAuth 令牌会定期刷新，网关无法长期使用。 |
-| `azure` | Azure OpenAI 需要 `api-version` 参数，网关不发送它。 |
 | `litellm_no_api_base` | LiteLLM 凭证没有 `api_base`。在 OpenViking 配置中补上后重新导入。 |
 | `litellm_unsupported_route` | LiteLLM 路由不使用 OpenAI Chat Completions API，例如 `gemini/`、`bedrock/` 或 `vertex_ai/`。请手动把这个服务商添加为上游。 |
 | `invalid_configuration` | 凭证构不成有效的上游，例如 base URL 无效。 |
@@ -204,7 +204,7 @@ curl -X POST "$SERVER_URL/gateway/admin/keys?account_id=team" \
 
 | HTTP | `reason` | 含义和处理 |
 | --- | --- | --- |
-| 401 | `management_key_invalid` | 管理密钥不正确。向部署者确认当前的管理密钥。 |
+| 401 | `management_key_invalid` | 管理密钥不正确。向部署者确认当前的管理密钥，或者见[忘记网关管理密钥](../guides/22-gateway-operations.md#忘记网关管理密钥)。 |
 | 403 | `management_key_required` | 已设置管理密钥，修改上游或上下文配置时必须带上它。 |
 | 401 | `openviking_http_401` | OpenViking 拒绝了 API 密钥。换用当前有效的密钥。 |
 | 401 | `openviking_identity_missing` | OpenViking 没有返回这把密钥对应的用户。 |

@@ -11,7 +11,7 @@
 
 [English](../../README.md) / [中文](README_CN.md) / 日本語
 
-<a href="https://www.openviking.ai">Webサイト</a> · <a href="https://openviking.ai/studio">ライブデモ</a> · <a href="https://github.com/volcengine/OpenViking">GitHub</a> · <a href="https://github.com/volcengine/OpenViking/issues">Issues</a> · <a href="https://docs.openviking.ai/">ドキュメント</a> · <a href="https://blog.openviking.ai/">ブログ</a>
+<a href="https://www.openviking.ai">Webサイト</a> · <a href="https://studio.openviking.ai">ライブデモ</a> · <a href="https://github.com/volcengine/OpenViking">GitHub</a> · <a href="https://github.com/volcengine/OpenViking/issues">Issues</a> · <a href="https://docs.openviking.ai/">ドキュメント</a> · <a href="https://blog.openviking.ai/">ブログ</a>
 
 <p>
   <a href="https://github.com/volcengine/OpenViking/releases"><img src="https://img.shields.io/github/v/release/volcengine/OpenViking?color=369eff&labelColor=black&logo=github&style=flat-square" alt="release"></a>
@@ -45,14 +45,14 @@ OpenVikingは、AIエージェントのためのオープンソースのコン�
 
 多くのエージェントメモリはブラックボックスです。テキストを入れると埋め込みが返ってきますが、何が保存されたのかは誰にも見えません。OpenVikingは、コンテキストを `viking://` という仮想ファイルシステムとして整理します。エージェントは `ls`、`tree`、`read`、`write`、`grep` でファイルのように操作し、人間もディレクトリを開いて中身を確認・編集できます。各ディレクトリには自動生成の要約があり、エージェントは要約を確認してから読む内容を決められます。
 
-<a href="https://openviking.ai/studio" target="_blank" rel="noopener noreferrer">
+<a href="https://studio.openviking.ai" target="_blank" rel="noopener noreferrer">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../images/studio-playground-dark.png">
     <img src="../images/studio-playground.png" alt="OpenViking Studio：コンテキストの閲覧と意味検索">
   </picture>
 </a>
 
-[OpenViking Studioを試す](https://openviking.ai/studio)。ブラウザから利用でき、インストールは不要です。 [Web Studioを自分の環境にデプロイ](../../web-studio/README.md)。
+[OpenViking Studioを試す](https://studio.openviking.ai)。ブラウザから利用でき、インストールは不要です。 [Web Studioを自分の環境にデプロイ](../../web-studio/README.md)。
 
 ## OpenVikingを選ぶ理由
 

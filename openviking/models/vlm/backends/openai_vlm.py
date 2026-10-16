@@ -189,6 +189,9 @@ class OpenAIVLM(VLMBase):
             max_tokens_param = "max_tokens"
             kwargs["temperature"] = self.temperature
 
+        if kwargs.get("tools") and self.provider != "openai-codex":
+            if re.match(r"gpt-(?:5\.[456]|6-(?:sol|luna))(?:-|$)", kwargs["model"].lower()):
+                kwargs["reasoning_effort"] = "none"
         effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
         if effective_max_tokens is not None:
             kwargs[max_tokens_param] = effective_max_tokens
@@ -288,10 +291,10 @@ class OpenAIVLM(VLMBase):
             "model": model,
             "messages": kwargs_messages,
         }
-        self._apply_completion_params(kwargs, effective_thinking, max_tokens=max_tokens)
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
+        self._apply_completion_params(kwargs, effective_thinking, max_tokens=max_tokens)
         return kwargs
 
     def _build_vision_kwargs(
@@ -319,10 +322,10 @@ class OpenAIVLM(VLMBase):
             "model": model,
             "messages": kwargs_messages,
         }
-        self._apply_completion_params(kwargs, effective_thinking)
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
+        self._apply_completion_params(kwargs, effective_thinking)
         return kwargs
 
     def _extract_completion_content(self, response, elapsed: float) -> str:

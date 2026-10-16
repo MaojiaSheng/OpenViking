@@ -229,6 +229,8 @@ export function UpstreamTest({
       testUpstream(connection, upstream.id, selectedModel),
   })
   const blocked = testBlockedReason(upstream)
+  // An exact endpoint has no model list; upstreams saved before the setting append the path.
+  const exact = upstream.append_endpoint_path === false
   const explanation = blocked
     ? t(`upstreams.test.${blocked}`)
     : [t('upstreams.test.hint'), note].filter(Boolean).join(' ')
@@ -254,7 +256,7 @@ export function UpstreamTest({
     modelTest.reset()
     setModel(configuredModels[0] ?? '')
     setOpen(true)
-    connectionTest.mutate()
+    if (!exact) connectionTest.mutate()
   }
   const submit = (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -262,7 +264,8 @@ export function UpstreamTest({
     if (selectedModel) modelTest.mutate(selectedModel)
   }
   const pending = connectionTest.isPending || modelTest.isPending
-  const connected = connectionTest.isSuccess && connectionTest.data.ok
+  const connected =
+    exact || (connectionTest.isSuccess && connectionTest.data.ok)
   const modelBlocked = upstream.coding_plan && !upstream.allow_coding_plan
 
   return (
@@ -319,7 +322,11 @@ export function UpstreamTest({
               <p className="text-xs font-medium">
                 {t('upstreams.test.dialog.connection')}
               </p>
-              {connectionTest.isPending ? (
+              {exact ? (
+                <p className="text-sm text-muted-foreground">
+                  {t('upstreams.test.dialog.exactEndpoint')}
+                </p>
+              ) : connectionTest.isPending ? (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   <LoaderCircleIcon className="size-4 animate-spin" />
                   {t('upstreams.test.dialog.checkingConnection')}
