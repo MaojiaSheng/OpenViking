@@ -429,24 +429,15 @@ pub async fn delete(
 
 pub async fn scan(
     client: &HttpClient,
-    scopes: &[String],
-    target_uri: Option<&str>,
+    uri: &str,
     fix: bool,
-    wait: bool,
-    node_limit: usize,
+    node_limit: u16,
     output_format: OutputFormat,
     compact: bool,
 ) -> Result<()> {
-    if target_uri.is_some() && !scopes.is_empty() {
-        return Err(Error::Client(
-            "Pass either --target or --scope, not both.".to_string(),
-        ));
-    }
     let body = serde_json::json!({
-        "scopes": scopes,
-        "target_uri": target_uri.unwrap_or(""),
+        "uri": uri,
         "fix": fix,
-        "wait": wait,
         "node_limit": node_limit,
     });
     let result = client.privacy_scan(&body).await?;

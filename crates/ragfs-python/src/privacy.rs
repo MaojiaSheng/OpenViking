@@ -51,4 +51,27 @@ impl PyPrivacyMatcher {
             .collect();
         (result.content, replacements, result.ambiguous_references)
     }
+
+    /// Return the regular result plus whether the replacement cap was exceeded.
+    fn sanitize_limited(
+        &self,
+        py: Python<'_>,
+        content: String,
+        max_replacements: usize,
+    ) -> (String, Vec<(usize, usize, String)>, Vec<Vec<String>>, bool) {
+        let matcher = self.inner.clone();
+        let (result, limit_exceeded) =
+            py.detach(move || matcher.sanitize_limited(&content, max_replacements));
+        let replacements = result
+            .replacements
+            .into_iter()
+            .map(|replacement| (replacement.start, replacement.end, replacement.reference))
+            .collect();
+        (
+            result.content,
+            replacements,
+            result.ambiguous_references,
+            limit_exceeded,
+        )
+    }
 }

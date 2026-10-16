@@ -33,6 +33,7 @@ class PrivacySanitizationResult:
     content: str
     replacements: tuple[PrivacyReplacement, ...] = ()
     ambiguous_references: tuple[tuple[str, ...], ...] = ()
+    match_limit_exceeded: bool = False
 
     @property
     def changed(self) -> bool:
@@ -65,11 +66,23 @@ class PrivacySanitizer:
         *,
         ctx: RequestContext,
         uri: str = "",
+        max_replacements: int | None = None,
     ) -> PrivacySanitizationResult:
         if not content or self._is_privacy_storage_uri(uri, ctx):
             return PrivacySanitizationResult(content=content)
         matcher = await self._matcher(ctx)
-        rewritten, raw_replacements, raw_ambiguous = matcher.sanitize(content)
+        match_limit_exceeded = False
+        if max_replacements is None:
+            rewritten, raw_replacements, raw_ambiguous = matcher.sanitize(content)
+        else:
+            if max_replacements < 0:
+                raise ValueError("max_replacements must be non-negative")
+            (
+                rewritten,
+                raw_replacements,
+                raw_ambiguous,
+                match_limit_exceeded,
+            ) = matcher.sanitize_limited(content, max_replacements)
         replacements = tuple(
             PrivacyReplacement(start=start, end=end, reference=reference)
             for start, end, reference in raw_replacements
@@ -78,6 +91,7 @@ class PrivacySanitizer:
             content=rewritten,
             replacements=replacements,
             ambiguous_references=tuple(tuple(items) for items in raw_ambiguous),
+            match_limit_exceeded=match_limit_exceeded,
         )
 
     async def _matcher(self, ctx: RequestContext) -> Any:

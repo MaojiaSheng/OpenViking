@@ -143,6 +143,21 @@ async def test_sanitizer_prefers_longest_overlap_and_does_not_replace_ambiguous_
     assert len(result.ambiguous_references[0]) == 2
 
 
+async def test_sanitizer_bounds_dense_match_metadata_for_scans():
+    catalog = _PrivacyCatalog({"credential": {"service": {"key": "secret"}}})
+    sanitizer = PrivacySanitizer(catalog)
+
+    result = await sanitizer.sanitize(
+        "secret secret secret",
+        ctx=_ctx(),
+        max_replacements=2,
+    )
+
+    assert result.match_limit_exceeded
+    assert result.content == "secret secret secret"
+    assert not result.replacements
+
+
 async def test_sanitizer_cache_rebuilds_only_after_catalog_revision_changes():
     catalog = _PrivacyCatalog({"credential": {"service": {"key": "first1"}}})
     sanitizer = PrivacySanitizer(catalog)

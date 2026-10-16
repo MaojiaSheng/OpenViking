@@ -150,8 +150,8 @@ ov privacy versions credential github
 ov privacy activate credential github 1
 ov privacy delete credential github pat --yes
 
-# Scan persisted content; the default only reports, while --fix replaces plaintext PATs
-ov privacy scan --scope resources,skills,memories
+# Scan one explicit URI; the default only reports, while --fix replaces plaintext PATs
+ov privacy scan --uri viking://~/resources/project-a
 ```
 
 ---

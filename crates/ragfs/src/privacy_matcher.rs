@@ -96,31 +96,47 @@ impl PrivacyMatcher {
 
     /// Rewrite all non-overlapping leftmost-longest matches.
     pub fn sanitize(&self, content: &str) -> PrivacySanitizeResult {
+        self.sanitize_limited(content, usize::MAX).0
+    }
+
+    /// Rewrite matches while bounding replacement metadata allocation.
+    ///
+    /// When the limit is exceeded, the original content is returned with empty
+    /// metadata and the boolean is set. Callers can then report the file as too
+    /// dense without retaining a potentially attacker-controlled match vector.
+    pub fn sanitize_limited(
+        &self,
+        content: &str,
+        max_replacements: usize,
+    ) -> (PrivacySanitizeResult, bool) {
         let Some(matcher) = &self.matcher else {
-            return PrivacySanitizeResult {
-                content: content.to_string(),
-                replacements: Vec::new(),
-                ambiguous_references: Vec::new(),
-            };
+            return (
+                PrivacySanitizeResult {
+                    content: content.to_string(),
+                    replacements: Vec::new(),
+                    ambiguous_references: Vec::new(),
+                },
+                false,
+            );
         };
 
-        let matches: Vec<_> = matcher.find_iter(content).collect();
-        if matches.is_empty() {
-            return PrivacySanitizeResult {
-                content: content.to_string(),
-                replacements: Vec::new(),
-                ambiguous_references: Vec::new(),
-            };
-        }
-
-        let extra_capacity = matches.len().saturating_mul(32);
-        let mut rewritten = String::with_capacity(content.len().saturating_add(extra_capacity));
-        let mut replacements = Vec::with_capacity(matches.len());
+        let mut rewritten = String::with_capacity(content.len());
+        let mut replacements = Vec::new();
         let mut ambiguous_references = Vec::new();
         let mut source_byte_cursor = 0;
         let mut source_char_cursor = 0;
 
-        for matched in matches {
+        for matched in matcher.find_iter(content) {
+            if replacements.len() >= max_replacements {
+                return (
+                    PrivacySanitizeResult {
+                        content: content.to_string(),
+                        replacements: Vec::new(),
+                        ambiguous_references: Vec::new(),
+                    },
+                    true,
+                );
+            }
             let start = matched.start();
             let end = matched.end();
             rewritten.push_str(&content[source_byte_cursor..start]);
@@ -145,13 +161,20 @@ impl PrivacyMatcher {
             });
             source_byte_cursor = end;
         }
-        rewritten.push_str(&content[source_byte_cursor..]);
-
-        PrivacySanitizeResult {
-            content: rewritten,
-            replacements,
-            ambiguous_references,
+        if replacements.is_empty() {
+            rewritten.push_str(content);
+        } else {
+            rewritten.push_str(&content[source_byte_cursor..]);
         }
+
+        (
+            PrivacySanitizeResult {
+                content: rewritten,
+                replacements,
+                ambiguous_references,
+            },
+            false,
+        )
     }
 }
 
@@ -209,5 +232,19 @@ mod tests {
         let result = matcher.sanitize("unchanged");
         assert_eq!(result.content, "unchanged");
         assert!(result.replacements.is_empty());
+    }
+
+    #[test]
+    fn limited_scan_stops_without_returning_partial_rewrites() {
+        let matcher = matcher(vec![("secret", vec!["ref"])]);
+        let (result, limit_exceeded) = matcher.sanitize_limited("secret secret secret", 2);
+        assert!(limit_exceeded);
+        assert_eq!(result.content, "secret secret secret");
+        assert!(result.replacements.is_empty());
+
+        let (result, limit_exceeded) = matcher.sanitize_limited("secret secret", 2);
+        assert!(!limit_exceeded);
+        assert_eq!(result.content, "ref ref");
+        assert_eq!(result.replacements.len(), 2);
     }
 }

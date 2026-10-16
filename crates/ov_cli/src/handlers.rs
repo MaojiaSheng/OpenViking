@@ -934,18 +934,14 @@ pub async fn handle_privacy(cmd: PrivacyCommands, ctx: CliContext) -> Result<()>
             .await
         }
         PrivacyCommands::Scan {
-            scopes,
-            target,
+            uri,
             fix,
-            wait,
             node_limit,
         } => {
             commands::privacy::scan(
                 &client,
-                &scopes,
-                target.as_deref(),
+                &uri,
                 fix,
-                wait,
                 node_limit,
                 ctx.output_format,
                 ctx.compact,

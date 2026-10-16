@@ -13,7 +13,7 @@ from openviking.privacy.reference import (
     parse_privacy_target_selector,
 )
 from openviking.privacy.sanitizer import PrivacySanitizer
-from openviking.privacy.scan import scan_privacy_content
+from openviking.privacy.scan import PRIVACY_SCAN_MAX_NODES, scan_privacy_content
 from openviking.privacy.validation import validate_privacy_field_name
 from openviking.server.auth import get_request_context
 from openviking.server.dependencies import get_service
@@ -59,11 +59,9 @@ class ActivatePrivacyConfigVersionRequest(BaseModel):
 class ScanPrivacyContentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    scopes: list[str] = Field(default_factory=list)
-    target_uri: str = ""
+    uri: str = Field(..., min_length=1, max_length=2048)
     fix: bool = False
-    wait: bool = False
-    node_limit: int = 10000
+    node_limit: int = Field(default=PRIVACY_SCAN_MAX_NODES, ge=1, le=PRIVACY_SCAN_MAX_NODES)
 
 
 class PrivacySelectorRequest(BaseModel):
@@ -103,11 +101,9 @@ async def scan_privacy_configs(
         service=service,
         ctx=_ctx,
         sanitizer=PrivacySanitizer(privacy),
-        scopes=request.scopes,
-        target_uri=request.target_uri,
+        uri=request.uri,
         fix=request.fix,
-        wait=request.wait,
-        node_limit=max(1, min(request.node_limit, 100000)),
+        node_limit=request.node_limit,
     )
     return Response(status="ok", result=result)
 

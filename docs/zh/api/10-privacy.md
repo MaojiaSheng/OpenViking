@@ -99,7 +99,7 @@
 
 ### scan_privacy_content()
 
-显式扫描已经持久化的文本内容。默认 dry-run，不返回命中的原值；`fix=true` 时替换无歧义命中并刷新相应内容。
+显式扫描一个已经持久化的文件或目录。默认 dry-run，不返回命中的原值；`fix=true` 时替换无歧义命中，并异步刷新相应内容。
 
 ```text
 POST /api/v1/privacy-configs/scan
@@ -107,15 +107,13 @@ POST /api/v1/privacy-configs/scan
 
 ```json
 {
-  "scopes": ["resources", "skills", "memories"],
-  "target_uri": "",
+  "uri": "viking://~/resources/project-a",
   "fix": false,
-  "wait": false,
-  "node_limit": 10000
+  "node_limit": 1000
 }
 ```
 
-`scopes` 与 `target_uri` 二选一。重复值对应多个 Privacy 字段时报告 `ambiguous`，不会任意选取引用。
+`uri` 必填，服务端刻意不支持按 scope 发起全域扫描。`node_limit` 只能在 1–1000 之间。服务端还强制限制为每个进程同时一个扫描、每秒最多读取 20 个文件、单文件最多 1 MiB、总输入最多 16 MiB、单文件最多记录 1000 个替换、每个命中文件最多返回 32 条引用详情、单次最多修复 100 个文件，并使用协作式 60 秒扫描预算；第二个并发请求返回 `RESOURCE_EXHAUSTED`。修复不会等待语义和向量刷新完成。响应会返回跳过文件计数、截断状态、停止原因和实际生效的限制。重复值对应多个 Privacy 字段时报告 `ambiguous`，不会任意选取引用。
 
 ---
 
@@ -564,9 +562,9 @@ ov privacy delete 'viking://~/privacy/credential/github-prod' --yes
 ov privacy delete credential github-prod api_key --yes
 ov privacy delete '{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}' --yes
 
-# 存量内容扫描默认为 dry-run；--fix 才会改写
-ov privacy scan --scope resources,skills,memories
-ov privacy scan --target viking://~/resources/project-a --fix --wait
+# 存量内容扫描必须指定一个 URI，默认为 dry-run；--fix 才会改写
+ov privacy scan --uri viking://~/resources/project-a
+ov privacy scan --uri viking://~/resources/project-a --fix --node-limit 500
 ```
 
 ---

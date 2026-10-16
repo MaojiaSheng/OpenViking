@@ -332,7 +332,7 @@ async def test_privacy_scan_is_dry_run_by_default_and_fix_rewrites_content(
 
     dry_run = await client.post(
         "/api/v1/privacy-configs/scan",
-        json={"target_uri": uri},
+        json={"uri": uri},
     )
     assert dry_run.status_code == 200, dry_run.text
     report = dry_run.json()["result"]
@@ -340,12 +340,15 @@ async def test_privacy_scan_is_dry_run_by_default_and_fix_rewrites_content(
     assert report["matched_files"] == 1
     assert report["repaired_files"] == 0
     assert report["matches"][0]["uri"] == uri
+    assert report["limits"]["max_nodes"] == 1000
+    assert report["limits"]["max_concurrent_scans_per_process"] == 1
+    assert report["scanned_bytes"] > 0
     assert secret not in str(report)
     assert secret in await service.viking_fs.read_file(uri, ctx=ctx)
 
     fixed = await client.post(
         "/api/v1/privacy-configs/scan",
-        json={"target_uri": uri, "fix": True},
+        json={"uri": uri, "fix": True},
     )
     assert fixed.status_code == 200, fixed.text
     fixed_report = fixed.json()["result"]
@@ -395,7 +398,7 @@ Use no credentials yet.
 
     fixed = await client.post(
         "/api/v1/privacy-configs/scan",
-        json={"target_uri": skill_uri, "fix": True, "wait": True},
+        json={"uri": skill_uri, "fix": True},
     )
     assert fixed.status_code == 200, fixed.text
     report = fixed.json()["result"]
@@ -409,6 +412,20 @@ Use no credentials yet.
         "legacy-skill-service",
         "custom",
     ) in stored
+
+
+async def test_privacy_scan_requires_explicit_uri_and_caps_tree_at_1000_nodes(
+    client: httpx.AsyncClient,
+):
+    for body in (
+        {},
+        {"scopes": ["resources"]},
+        {"uri": "viking://~/resources", "node_limit": 1001},
+        {"uri": "viking://~/resources", "wait": True},
+    ):
+        response = await client.post("/api/v1/privacy-configs/scan", json=body)
+        assert response.status_code == 400, response.text
+        assert response.json()["error"]["code"] == "INVALID_ARGUMENT"
 
 
 async def test_privacy_resolve_accepts_reference_and_field_uri_and_checks_owner(

@@ -795,8 +795,8 @@ const COMMAND_HELP_SPECS: &[CommandHelpSpec] = &[
                 description: "Update one field; --key and --key-<name> remain compatible.",
             },
             HelpItem {
-                label: "ov privacy scan --scope resources,skills,memories",
-                description: "Dry-run scan for registered Privacy values in stored content.",
+                label: "ov privacy scan --uri <viking-uri>",
+                description: "Dry-run one explicit URI under strict server resource limits.",
             },
         ],
         next_steps: &[HelpItem {

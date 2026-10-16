@@ -41,7 +41,7 @@ Activating a version changes only the values stored in OpenViking. It does not r
 
 ## Scan Stored Content
 
-Explicitly scan persisted text. The default is a dry run and never returns the matched value. With `fix=true`, unambiguous matches are replaced and affected content is refreshed.
+Explicitly scan one persisted file or directory. The default is a dry run and never returns the matched value. With `fix=true`, unambiguous matches are replaced and affected content is refreshed asynchronously.
 
 ```text
 POST /api/v1/privacy-configs/scan
@@ -49,15 +49,13 @@ POST /api/v1/privacy-configs/scan
 
 ```json
 {
-  "scopes": ["resources", "skills", "memories"],
-  "target_uri": "",
+  "uri": "viking://~/resources/project-a",
   "fix": false,
-  "wait": false,
-  "node_limit": 10000
+  "node_limit": 1000
 }
 ```
 
-Use either `scopes` or `target_uri`. When one value maps to multiple Privacy fields, the result reports `ambiguous` and never chooses a reference arbitrarily.
+`uri` is required. Broad scope-based scans are intentionally unsupported. `node_limit` must be between 1 and 1000. The server also enforces one scan per process, 20 file reads per second, 1 MiB per file, 16 MiB total input, 1,000 replacements per file, at most 32 reference details per matched file, at most 100 repaired files, and a cooperative 60-second scan budget. A second concurrent request receives `RESOURCE_EXHAUSTED`. Repair never waits for semantic/vector refresh work. Responses report skipped files, truncation, the stop reason, and the effective limits. When one value maps to multiple Privacy fields, the result reports `ambiguous` and never chooses a reference arbitrarily.
 
 ---
 
@@ -561,9 +559,9 @@ ov privacy delete 'viking://~/privacy/credential/github-prod' --yes
 ov privacy delete credential github-prod api_key --yes
 ov privacy delete '{{ov_privacy:alice:viking://~/privacy/credential/github-prod#/values/api_key}}' --yes
 
-# Stored-content scans are dry-run unless --fix is passed
-ov privacy scan --scope resources,skills,memories
-ov privacy scan --target viking://~/resources/project-a --fix --wait
+# Stored-content scans require one URI and are dry-run unless --fix is passed
+ov privacy scan --uri viking://~/resources/project-a
+ov privacy scan --uri viking://~/resources/project-a --fix --node-limit 500
 ```
 
 ---

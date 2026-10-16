@@ -2060,21 +2060,19 @@ enum PrivacyCommands {
     },
     /// Scan persisted content for registered Privacy values
     Scan {
-        /// Comma-separated scopes: resources,skills,memories
-        #[arg(long = "scope", value_delimiter = ',', value_name = "scope")]
-        scopes: Vec<String>,
-        /// Scan one exact viking:// file or directory instead of default scopes
-        #[arg(long, conflicts_with = "scopes", value_name = "uri")]
-        target: Option<String>,
+        /// Exact viking:// file or directory to scan
+        #[arg(long, value_name = "uri")]
+        uri: String,
         /// Rewrite unambiguous matches and refresh derived indexes
         #[arg(long)]
         fix: bool,
-        /// Wait for refresh/reindex work after fixing
-        #[arg(long)]
-        wait: bool,
         /// Maximum files/nodes enumerated per root
-        #[arg(long, default_value_t = 10000)]
-        node_limit: usize,
+        #[arg(
+            long,
+            default_value_t = 1000,
+            value_parser = clap::value_parser!(u16).range(1..=1000)
+        )]
+        node_limit: u16,
     },
 }
 
@@ -6182,28 +6180,39 @@ mod tests {
                 OsString::from("ov"),
                 OsString::from("privacy"),
                 OsString::from("scan"),
-                OsString::from("--scope"),
-                OsString::from("resources,memories"),
+                OsString::from("--uri"),
+                OsString::from("viking://~/resources/project-a"),
                 OsString::from("--fix"),
-                OsString::from("--wait"),
             ]));
             match scan.command {
                 Commands::Privacy { action } => match *action {
                     PrivacyCommands::Scan {
-                        scopes,
-                        target,
+                        uri,
                         fix,
-                        wait,
                         node_limit,
                     } => {
-                        assert_eq!(scopes, vec!["resources", "memories"]);
-                        assert!(target.is_none());
-                        assert!(fix && wait);
-                        assert_eq!(node_limit, 10000);
+                        assert_eq!(uri, "viking://~/resources/project-a");
+                        assert!(fix);
+                        assert_eq!(node_limit, 1000);
                     }
                     _ => panic!("expected privacy scan"),
                 },
                 _ => panic!("expected privacy command"),
+            }
+
+            for invalid_args in [
+                vec!["ov", "privacy", "scan"],
+                vec![
+                    "ov",
+                    "privacy",
+                    "scan",
+                    "--uri",
+                    "viking://~/resources/project-a",
+                    "--node-limit",
+                    "1001",
+                ],
+            ] {
+                assert!(Cli::try_parse_from(invalid_args).is_err());
             }
 
             let reference =

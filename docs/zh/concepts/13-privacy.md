@@ -150,8 +150,8 @@ ov privacy versions credential github
 ov privacy activate credential github 1
 ov privacy delete credential github pat --yes
 
-# 扫描已经持久化的正文；默认仅报告，--fix 才会替换明文 PAT
-ov privacy scan --scope resources,skills,memories
+# 扫描一个明确的 URI；默认仅报告，--fix 才会替换明文 PAT
+ov privacy scan --uri viking://~/resources/project-a
 ```
 
 ---
