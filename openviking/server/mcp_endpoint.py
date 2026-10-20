@@ -442,7 +442,7 @@ async def set_acl(uri: str, acl: AclSpec) -> dict[str, Any]:
 
 @_mcp_error_results()
 @mcp.tool(annotations=_READ_ONLY_TOOL_ANNOTATIONS)
-async def ov_privacy_tree(
+async def privacy_tree(
     category: Annotated[
         Optional[str], Field(description="Only list this category, e.g. credential or skill")
     ] = None,
@@ -451,7 +451,7 @@ async def ov_privacy_tree(
     Use when you need to check whether a GitHub PAT or a skill's api_key is saved.
     Returns categories, targets, active versions, configured flags and complete
     {{ov_privacy:...}} references, never secret values or history. Pass a returned
-    reference to ov_privacy_resolve when you need the actual value for a task.
+    reference to privacy_resolve when you need the actual value for a task.
     """
     ctx = _get_ctx()
     return await build_privacy_tree(get_service().privacy_configs, ctx, category)
@@ -459,7 +459,7 @@ async def ov_privacy_tree(
 
 @_mcp_error_results()
 @mcp.tool(annotations=_READ_ONLY_TOOL_ANNOTATIONS)
-async def ov_privacy_resolve(
+async def privacy_resolve(
     reference: Annotated[
         str,
         Field(
@@ -476,7 +476,7 @@ async def ov_privacy_resolve(
     Use the returned value in the API's Authorization header or credential field;
     do not send the placeholder itself as a key. Returns one current field owned
     by the caller. Keep references in saved documents and do not echo the secret
-    in chat. If you do not know the reference, use ov_privacy_tree first.
+    in chat. If you do not know the reference, use privacy_tree first.
     """
     ctx = _get_ctx()
     return await resolve_privacy_field(get_service().privacy_configs, ctx, reference)
@@ -484,7 +484,7 @@ async def ov_privacy_resolve(
 
 @_mcp_error_results()
 @mcp.tool(annotations=_DESTRUCTIVE_TOOL_ANNOTATIONS)
-async def ov_privacy_upsert(
+async def privacy_upsert(
     category: Annotated[str, Field(description="Credential category, e.g. credential or skill")],
     target_key: Annotated[
         str, Field(description="Credential target, e.g. github or the skill name")

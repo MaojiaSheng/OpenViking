@@ -143,9 +143,9 @@ The built-in MCP tools are listed below. Use the connected server's `tools/list`
 | `glob` | Find files matching a glob pattern | `pattern`, `uri` (optional scope), `node_limit` |
 | `forget` | Delete any `viking://` URI (use `search` to find it first; pass `recursive=true` to delete a directory). Deleting a skill directory this way leaves the skill's privacy configuration behind; remove a skill with `ov skills remove` or `DELETE /api/v1/skills/{name}` | `uri`, `recursive` (optional) |
 | `health` | Check OpenViking service health | none |
-| `ov_privacy_tree` | Check which credentials are saved; return active field metadata and references without values | `category` (optional) |
-| `ov_privacy_resolve` | Turn a complete `{{ov_privacy:...}}` placeholder into one current field's actual value for immediate use | `reference` |
-| `ov_privacy_upsert` | Save user-supplied credential fields with an atomic merge; return metadata and references without values | `category`, `target_key`, `values` |
+| `privacy_tree` | Check which credentials are saved; return active field metadata and references without values | `category` (optional) |
+| `privacy_resolve` | Turn a complete `{{ov_privacy:...}}` placeholder into one current field's actual value for immediate use | `reference` |
+| `privacy_upsert` | Save user-supplied credential fields with an atomic merge; return metadata and references without values | `category`, `target_key`, `values` |
 | `list_users` | Find user IDs in the caller's account; credentials are excluded by default, including for administrators | `query` (ID substring), `limit` (100), `page` (1), `include_credentials` (false; true requires ADMIN/ROOT) |
 | `list_groups` | List group IDs in the caller's account without membership | None |
 | `get_acl` | Read direct, inherited and effective ACL; requires resource manage or account ADMIN | `uri` |
@@ -177,12 +177,12 @@ If a SKILL.md, document or tool result contains an authentication placeholder su
 Authorization: Bearer {{ov_privacy:alice:viking://~/privacy/credential/github#/values/pat}}
 ```
 
-and the current task needs the credential, call `ov_privacy_resolve` with the entire
+and the current task needs the credential, call `privacy_resolve` with the entire
 placeholder unchanged, excluding the surrounding `Authorization: Bearer` text:
 
 ```json
 {
-  "name": "ov_privacy_resolve",
+  "name": "privacy_resolve",
   "arguments": {
     "reference": "{{ov_privacy:alice:viking://~/privacy/credential/github#/values/pat}}"
   }
@@ -193,9 +193,9 @@ These are the parameters for an MCP `tools/call` request. Use the returned `valu
 in the API's authentication field; the placeholder itself is not a working key.
 Resolution uses the current active version and rejects another owner's reference,
 even for administrators. Field-level Privacy URIs are also accepted. If you do not
-know the reference, call `ov_privacy_tree`, optionally filtering by `category`.
+know the reference, call `privacy_tree`, optionally filtering by `category`.
 
-To save a PAT supplied by the user, call `ov_privacy_upsert` with
+To save a PAT supplied by the user, call `privacy_upsert` with
 `category="credential"`, `target_key="github"` and `values={"pat":"<user-provided-token>"}`.
 It creates the target or merges the supplied fields, preserving other fields such
 as `username`. Changed values create and activate a version; this does not rotate

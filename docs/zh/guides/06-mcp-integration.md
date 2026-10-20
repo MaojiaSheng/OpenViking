@@ -139,9 +139,9 @@ claude mcp add --transport http openviking \
 | `glob` | 按 glob 模式匹配文件 | `pattern`, `uri`(可选范围), `node_limit` |
 | `forget` | 删除任意 `viking://` URI（先用 `search` 查找；删除目录需 `recursive=true`）。用它删 skill 目录会残留该 skill 的 privacy 配置，请改用 `ov skills remove` 或 `DELETE /api/v1/skills/{name}` | `uri`, `recursive`（可选） |
 | `health` | 检查 OpenViking 服务健康状态 | 无 |
-| `ov_privacy_tree` | 盘点已保存的凭据；返回当前字段元数据及引用，不含值 | `category`（可选） |
-| `ov_privacy_resolve` | 将完整的 `{{ov_privacy:...}}` 占位符解析为一个当前字段的实际值，供立即使用 | `reference` |
-| `ov_privacy_upsert` | 原子合并用户提供的凭据字段；返回元数据和引用，不回显值 | `category`, `target_key`, `values` |
+| `privacy_tree` | 盘点已保存的凭据；返回当前字段元数据及引用，不含值 | `category`（可选） |
+| `privacy_resolve` | 将完整的 `{{ov_privacy:...}}` 占位符解析为一个当前字段的实际值，供立即使用 | `reference` |
+| `privacy_upsert` | 原子合并用户提供的凭据字段；返回元数据和引用，不回显值 | `category`, `target_key`, `values` |
 | `list_users` | 查询当前 account 的用户 ID；默认不返回凭证，管理员也一样 | `query`(可选，ID 子串), `limit`(默认 100), `page`(默认 1), `include_credentials`(默认 false，仅 ADMIN/ROOT 可设为 true) |
 | `list_groups` | 查询当前 account 的组 ID，不返回成员名单 | 无 |
 | `get_acl` | 查看共享资源的直接、继承和有效 ACL；要求该节点的 manage 或账号 ADMIN | `uri` |
@@ -171,11 +171,11 @@ claude mcp add --transport http openviking \
 Authorization: Bearer {{ov_privacy:alice:viking://~/privacy/credential/github#/values/pat}}
 ```
 
-调用 `ov_privacy_resolve`，原样传入完整占位符，不要带上外部的 `Authorization: Bearer`：
+调用 `privacy_resolve`，原样传入完整占位符，不要带上外部的 `Authorization: Bearer`：
 
 ```json
 {
-  "name": "ov_privacy_resolve",
+  "name": "privacy_resolve",
   "arguments": {
     "reference": "{{ov_privacy:alice:viking://~/privacy/credential/github#/values/pat}}"
   }
@@ -184,9 +184,9 @@ Authorization: Bearer {{ov_privacy:alice:viking://~/privacy/credential/github#/v
 
 以上是 MCP `tools/call` 请求的参数。将返回的 `value` 填入 API 的认证字段；占位符本身不是
 可以直接使用的密钥。解析始终读取当前生效版本，并拒绝其他 owner 的引用，管理员也不例外。
-也支持字段级 Privacy URI。不知道引用时，先调用 `ov_privacy_tree`，可用 `category` 缩小范围。
+也支持字段级 Privacy URI。不知道引用时，先调用 `privacy_tree`，可用 `category` 缩小范围。
 
-用户提供 PAT 并要求保存时，调用 `ov_privacy_upsert`，传入 `category="credential"`、
+用户提供 PAT 并要求保存时，调用 `privacy_upsert`，传入 `category="credential"`、
 `target_key="github"` 和 `values={"pat":"<user-provided-token>"}`。目标不存在时创建，存在时
 合并指定字段，保留 `username` 等其他字段。值变化后创建并激活版本，但不会到外部服务轮换凭据。
 成功响应只描述本次更新的字段，不回显它们的值。

@@ -94,11 +94,11 @@ def test_get_ctx_raises_when_unset():
 
 async def test_privacy_tools_describe_placeholder_resolution_and_permissions():
     tools = {tool.name: tool for tool in await mcp_endpoint.mcp.list_tools()}
-    for name in ("ov_privacy_tree", "ov_privacy_resolve"):
+    for name in ("privacy_tree", "privacy_resolve"):
         assert tools[name].annotations.readOnlyHint is True
-    assert tools["ov_privacy_upsert"].annotations.readOnlyHint is False
-    assert tools["ov_privacy_upsert"].annotations.destructiveHint is True
-    resolve_tool = tools["ov_privacy_resolve"]
+    assert tools["privacy_upsert"].annotations.readOnlyHint is False
+    assert tools["privacy_upsert"].annotations.destructiveHint is True
+    resolve_tool = tools["privacy_resolve"]
     assert (
         "{{ov_privacy:alice:viking://~/privacy/credential/github#/values/pat}}"
         in resolve_tool.description
@@ -107,18 +107,18 @@ async def test_privacy_tools_describe_placeholder_resolution_and_permissions():
     assert "Authorization" in resolve_tool.description
     assert set(resolve_tool.inputSchema["properties"]) == {"reference"}
     assert resolve_tool.inputSchema["required"] == ["reference"]
-    assert set(tools["ov_privacy_upsert"].inputSchema["required"]) == {
+    assert set(tools["privacy_upsert"].inputSchema["required"]) == {
         "category",
         "target_key",
         "values",
     }
-    assert tools["ov_privacy_upsert"].inputSchema["properties"]["values"]["type"] == "object"
+    assert tools["privacy_upsert"].inputSchema["properties"]["values"]["type"] == "object"
 
 
 async def test_privacy_tools_merge_discover_and_resolve_without_echoing_saved_values(client):
     secrets = ["pat-original-marker", "pat-updated-marker", "username-private-marker"]
     saved = await mcp_endpoint.mcp.call_tool(
-        "ov_privacy_upsert",
+        "privacy_upsert",
         {
             "category": "credential",
             "target_key": "github",
@@ -127,12 +127,12 @@ async def test_privacy_tools_merge_discover_and_resolve_without_echoing_saved_va
     )
     assert saved[1]["version"] == 1
     update = {"category": "credential", "target_key": "github", "values": {"pat": secrets[1]}}
-    patched = await mcp_endpoint.mcp.call_tool("ov_privacy_upsert", update)
+    patched = await mcp_endpoint.mcp.call_tool("privacy_upsert", update)
     assert patched[1]["version"] == 2
     assert [field["field"] for field in patched[1]["fields"]] == ["pat"]
-    repeated = await mcp_endpoint.mcp.call_tool("ov_privacy_upsert", update)
+    repeated = await mcp_endpoint.mcp.call_tool("privacy_upsert", update)
     assert repeated[1]["version"] == 2
-    tree = await mcp_endpoint.mcp.call_tool("ov_privacy_tree", {"category": "credential"})
+    tree = await mcp_endpoint.mcp.call_tool("privacy_tree", {"category": "credential"})
     response = await client.get(
         "/api/v1/privacy-configs/tree",
         params={"category": "credential"},
@@ -146,7 +146,7 @@ async def test_privacy_tools_merge_discover_and_resolve_without_echoing_saved_va
     target = tree[1]["categories"][0]["targets"][0]
     assert target["version"] == 2
     resolved = await mcp_endpoint.mcp.call_tool(
-        "ov_privacy_resolve",
+        "privacy_resolve",
         {
             "reference": target["fields"][0]["reference"],
         },
@@ -155,7 +155,7 @@ async def test_privacy_tools_merge_discover_and_resolve_without_echoing_saved_va
     assert resolved[1]["version"] == 2
     assert "username" not in resolved[1]
     retained = await mcp_endpoint.mcp.call_tool(
-        "ov_privacy_resolve",
+        "privacy_resolve",
         {
             "reference": "viking://~/privacy/credential/github#/values/username",
         },
@@ -170,7 +170,7 @@ async def test_privacy_resolve_checks_owner_before_storage(service, monkeypatch,
     token = _mcp_ctx.set(RequestContext(DEFAULT_CTX.user, role))
     try:
         result = await mcp_endpoint.mcp.call_tool(
-            "ov_privacy_resolve",
+            "privacy_resolve",
             {
                 "reference": build_privacy_field_reference(
                     "another-owner", "credential", "github", "pat"
@@ -187,7 +187,7 @@ async def test_privacy_resolve_checks_owner_before_storage(service, monkeypatch,
 
 async def test_privacy_tools_keep_same_owner_in_other_accounts_isolated():
     await mcp_endpoint.mcp.call_tool(
-        "ov_privacy_upsert",
+        "privacy_upsert",
         {
             "category": "credential",
             "target_key": "github",
@@ -198,9 +198,9 @@ async def test_privacy_tools_keep_same_owner_in_other_accounts_isolated():
         RequestContext(UserIdentifier("another-account", DEFAULT_CTX.user.user_id), Role.USER)
     )
     try:
-        tree = await mcp_endpoint.mcp.call_tool("ov_privacy_tree", {})
+        tree = await mcp_endpoint.mcp.call_tool("privacy_tree", {})
         missing = await mcp_endpoint.mcp.call_tool(
-            "ov_privacy_resolve",
+            "privacy_resolve",
             {
                 "reference": build_privacy_field_reference(
                     DEFAULT_CTX.user.user_id, "credential", "github", "pat"
@@ -217,7 +217,7 @@ async def test_privacy_tools_keep_same_owner_in_other_accounts_isolated():
 
 async def test_privacy_tools_return_structured_errors_without_values():
     await mcp_endpoint.mcp.call_tool(
-        "ov_privacy_upsert",
+        "privacy_upsert",
         {
             "category": "credential",
             "target_key": "github",
@@ -225,19 +225,19 @@ async def test_privacy_tools_return_structured_errors_without_values():
         },
     )
     cases = [
-        ("ov_privacy_tree", {"category": "../credential"}, "INVALID_ARGUMENT"),
+        ("privacy_tree", {"category": "../credential"}, "INVALID_ARGUMENT"),
         (
-            "ov_privacy_resolve",
+            "privacy_resolve",
             {"reference": "Authorization: Bearer {{ov_privacy:...}}"},
             "INVALID_ARGUMENT",
         ),
         (
-            "ov_privacy_resolve",
+            "privacy_resolve",
             {"reference": "viking://~/privacy/credential/github#/values/missing"},
             "NOT_FOUND",
         ),
         (
-            "ov_privacy_upsert",
+            "privacy_upsert",
             {
                 "category": "credential",
                 "target_key": "bad/target",
@@ -256,16 +256,16 @@ async def test_privacy_tools_return_structured_errors_without_values():
 
 async def test_privacy_tools_handle_disabled_service(service, monkeypatch):
     monkeypatch.setattr(service, "_privacy_config_service", None)
-    tree = await mcp_endpoint.mcp.call_tool("ov_privacy_tree", {})
+    tree = await mcp_endpoint.mcp.call_tool("privacy_tree", {})
     assert tree[1] == {"owner_user_id": DEFAULT_CTX.user.user_id, "categories": []}
     for name, arguments, code in [
         (
-            "ov_privacy_resolve",
+            "privacy_resolve",
             {"reference": "viking://~/privacy/credential/github#/values/pat"},
             "NOT_FOUND",
         ),
         (
-            "ov_privacy_upsert",
+            "privacy_upsert",
             {
                 "category": "credential",
                 "target_key": "github",
