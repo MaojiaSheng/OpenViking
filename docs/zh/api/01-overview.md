@@ -516,6 +516,7 @@ JSON 输出 - 错误：
 | PUT | `/api/v1/admin/accounts/{account_id}/groups/{group_id}/members/{user_id}` | 添加用户组成员 |
 | DELETE | `/api/v1/admin/accounts/{account_id}/groups/{group_id}/members/{user_id}` | 移除用户组成员 |
 | GET | `/api/v1/privacy-configs` | 列出隐私配置分类 |
+| GET | `/api/v1/privacy-configs/tree` | 树形列出当前目标和字段元数据，不返回值 |
 | POST | `/api/v1/privacy-configs/scan` | 扫描或修复正文中的登记值 |
 | GET | `/api/v1/privacy-configs/{category}` | 列出分类目标 |
 | GET | `/api/v1/privacy-configs/{category}/{target_key}` | 获取生效配置 |

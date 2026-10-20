@@ -14,7 +14,10 @@ from openviking.privacy.reference import (
 )
 from openviking.privacy.sanitizer import PrivacySanitizer
 from openviking.privacy.scan import PRIVACY_SCAN_MAX_NODES, scan_privacy_content
-from openviking.privacy.validation import validate_privacy_field_name
+from openviking.privacy.validation import (
+    validate_privacy_field_name,
+    validate_privacy_identifier,
+)
 from openviking.server.auth import get_request_context
 from openviking.server.dependencies import get_service
 from openviking.server.identity import RequestContext
@@ -204,6 +207,64 @@ async def delete_privacy_selector(
             "deleted": deleted,
             "scope": "target",
         },
+    )
+
+
+@router.get("/tree")
+async def list_privacy_tree(
+    category: Optional[str] = Query(None, description="Limit the tree to one category"),
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    """List the caller's active Privacy targets and field metadata without values."""
+    if category is not None:
+        validate_privacy_identifier(category, "category")
+    service = get_service()
+    privacy = service.privacy_configs
+    if privacy is None:
+        return Response(
+            status="ok",
+            result={"owner_user_id": _ctx.user.user_id, "categories": []},
+        )
+
+    if category is not None:
+        categories = [category]
+    else:
+        categories = await privacy.list_categories(_ctx)
+
+    tree = []
+    for name in categories:
+        targets = []
+        for target_key in await privacy.list_targets(_ctx, name):
+            current = await privacy.get_current(_ctx, name, target_key)
+            if current is None:
+                # A Skill update may leave an empty directory behind solely for
+                # its lock; only persisted configuration belongs in the tree.
+                continue
+            fields = [
+                {
+                    "field": field,
+                    "configured": value is not None and str(value) != "",
+                    "reference": build_privacy_field_reference(
+                        _ctx.user.user_id,
+                        name,
+                        target_key,
+                        field,
+                    ),
+                }
+                for field, value in sorted(current.values.items())
+            ]
+            targets.append(
+                {
+                    "target_key": target_key,
+                    "version": current.version,
+                    "fields": fields,
+                }
+            )
+        tree.append({"category": name, "targets": targets})
+
+    return Response(
+        status="ok",
+        result={"owner_user_id": _ctx.user.user_id, "categories": tree},
     )
 
 
