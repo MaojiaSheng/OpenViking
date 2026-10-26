@@ -372,7 +372,8 @@ async def list_users(
     """Find users to grant access to in the caller's account. Returns user_id and
     matching total by default, including for administrators. query matches a
     substring of user_id. include_credentials=true requires ADMIN or ROOT and
-    returns available credentials; it is forbidden in trusted auth mode.
+    returns plaintext only to ROOT, masked key_prefix to ADMIN; it is forbidden
+    in trusted auth mode.
     Resource manage permission does not grant account administrator privileges.
     """
     ctx = _get_ctx()
@@ -388,6 +389,7 @@ async def list_users(
         page=page,
         query_filter=query,
         expose_key=include_credentials,
+        mask_keys=ctx.role != Role.ROOT,
     )
     fields = ("user_id", "role", "api_key", "key_prefix") if include_credentials else ("user_id",)
     return {

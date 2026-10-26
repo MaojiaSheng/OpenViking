@@ -1013,7 +1013,7 @@ async def list_users(
     limit: int | None = Query(None, ge=1, description="Page size; omit to return all"),
     include_credentials: bool = Query(
         True,
-        description="Include credentials when permitted; false returns only credential availability",
+        description="Include ROOT-only plaintext or masked ADMIN keys; false returns only availability",
     ),
     name: str | None = None,
     role: str | None = None,
@@ -1033,6 +1033,7 @@ async def list_users(
         name_filter=name,
         role_filter=role,
         expose_key=should_expose_user_key(request) or not include_credentials,
+        mask_keys=include_credentials and ctx.role != Role.ROOT,
         page=page,
         query_filter=query,
     )

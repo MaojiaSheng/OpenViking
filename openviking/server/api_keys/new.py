@@ -55,6 +55,15 @@ def generate_api_key(account_id: str, user_id: str, seed: Optional[str] = None) 
     return ".".join(map(_encode_segment, (account_id, user_id, secret)))
 
 
+def mask_api_key(api_key: str) -> str:
+    """Keep identity segments and at most four secret characters for display."""
+    if is_new_format_key(api_key):
+        account, user, secret = api_key.split(".")
+        prefix = secret[:4] if len(secret) > 4 else ""
+        return f"{account}.{user}.{prefix}****"
+    return f"{api_key[:4] if len(api_key) > 4 else ''}****"
+
+
 class APIKeyManager:
     """Coordinate API key operations over an already-constructed account store."""
 
@@ -233,6 +242,7 @@ class APIKeyManager:
 
     async def list_users_page(self, account_id, **filters):
         expose_key = filters.pop("expose_key", True)
+        mask_keys = filters.pop("mask_keys", False)
         store_filters = {
             name: filters[name]
             for name in (
@@ -253,6 +263,10 @@ class APIKeyManager:
             for user in page["users"]:
                 user.pop("api_key", None)
                 user.pop("key_prefix", None)
+        elif mask_keys:
+            for user in page["users"]:
+                if api_key := user.pop("api_key", None):
+                    user["key_prefix"] = mask_api_key(api_key)
         return page
 
     async def has_user(self, account_id, user_id):

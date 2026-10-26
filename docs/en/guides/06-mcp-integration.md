@@ -215,7 +215,8 @@ not echo resolved secrets in chat. Tree and upsert return no stored values.
 
 All account users may call `list_users` and `list_groups`; neither tool accepts a different account.
 The default output contains only user IDs and a matching total, or group IDs. Even administrators
-must explicitly set `include_credentials=true` to include available credentials. A USER requesting
+must explicitly set `include_credentials=true` to include credential fields: only ROOT receives
+available plaintext in `api_key`; ADMIN receives masked `key_prefix` values. A USER requesting
 credentials receives `PERMISSION_DENIED`, even when the query matches no users. Trusted auth mode
 forbids credential disclosure. Group membership remains available through the admin API.
 
