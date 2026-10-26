@@ -1013,7 +1013,11 @@ async def list_users(
     limit: int | None = Query(None, ge=1, description="Page size; omit to return all"),
     include_credentials: bool = Query(
         True,
-        description="Include ROOT-only plaintext or masked ADMIN keys; false returns only availability",
+        description=(
+            "Include credentials: ROOT receives all plaintext keys; ADMIN/USER receive the "
+            "caller's own plaintext key and masked key_prefix for other users; "
+            "false returns only availability"
+        ),
     ),
     name: str | None = None,
     role: str | None = None,
@@ -1034,6 +1038,8 @@ async def list_users(
         role_filter=role,
         expose_key=should_expose_user_key(request) or not include_credentials,
         mask_keys=include_credentials and ctx.role != Role.ROOT,
+        viewer_account_id=ctx.account_id,
+        viewer_user_id=ctx.user.user_id,
         page=page,
         query_filter=query,
     )

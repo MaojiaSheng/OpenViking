@@ -1474,8 +1474,9 @@ ov admin register-user acme bob-private --role user \
 **说明：**
 - 结果按创建顺序返回
 - ADMIN 只能列出自己所属的 account 中的用户
-- 只有 ROOT 能通过 `api_key` 获取已存储的明文密钥。ADMIN 仅收到 `key_prefix`，包括自身和其他 ADMIN 的记录。三段式密钥保留前两段和末段最多前 4 个字符，其后追加 `****`；末段不超过 4 个字符时完全隐藏。旧格式密钥最多保留前 4 个字符；仅存哈希的凭据沿用已有前缀。
+- ROOT 可通过 `api_key` 获取全部已存储的明文密钥。非 ROOT 调用方只有自身那一行返回 `api_key` 明文，其他用户（包括其他 ADMIN）均返回打码后的 `key_prefix`。自身匹配是严格匹配：列表 account、行内 user ID 以及三段式 key 内嵌的 account/user 段必须全部等于调用方认证身份，否则该行仍打码。三段式密钥保留前两段和 secret 的最后 4 个字符，secret 中其余每个字符均替换为 `*`；secret 不超过 4 个字符时完全隐藏。非三段式密钥完全隐藏；仅存哈希的凭据沿用已有前缀。
 - 打码在服务端执行，同时覆盖 HTTP 和 MCP 的 `list_users(include_credentials=true)`，因此 CLI/SDK 的 JSON 输出也受保护。客户端只能将 `key_prefix` 用于展示，切换身份时需要另行提供可用密钥。
+- `ov admin list-users` 默认还会在 CLI 侧对明文 `api_key` 行使用相同格式打码，table 和 JSON 输出保持一致，并在 stderr 打印提示。传入 `--reveal-api-keys` 可输出明文：ROOT 会显示全部密钥，ADMIN/USER 调用方仍只能看到自身密钥（其他行由服务端打码）。该 flag 只影响 CLI 渲染，不改变服务端响应。table 输出会把服务端的 `api_key`（明文或 CLI 打码值）与 `key_prefix` 合并为同一个 `api_key` 列；JSON 输出保留服务端的字段名。
 - 本限制针对已存储密钥的列表浏览。创建用户与重置密钥仍会向 ROOT 或 ADMIN 返回新密钥；普通 USER 尚无自助轮换接口。
 - 在 `trusted` 模式下，响应中不会包含 `api_key` 或 `key_prefix` 字段
 - 用户删除开始后，不再出现在该列表中
@@ -1547,6 +1548,8 @@ fmt.Println(users)
 ov admin list-users acme
 # 如果使用 root_api_key（--sudo）：
 ov --sudo admin list-users acme
+# 输出明文密钥而不是打码值（仅 ROOT）
+ov --sudo admin list-users acme --reveal-api-keys
 # 按通配符 name 过滤
 ov admin list-users acme --name '*ali*'
 # 分页

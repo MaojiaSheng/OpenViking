@@ -1611,15 +1611,16 @@ List active users in a workspace. Users with deletion in progress are omitted.
 | role | str | No | null | Filter by role |
 | query | str | No | null | HTTP-only, case-insensitive literal substring match on user IDs |
 | include_summary | bool | No | false | HTTP-only, return paginated users and account statistics in an object |
-| include_credentials | bool | No | true | HTTP-only. ROOT receives available plaintext keys; ADMIN receives masked prefixes. Set false to return `user_id`, `role`, and `api_key_available` without credentials or key prefixes. `api_key_available` is true only when the server can read the complete key for a server-side binding; hash-only credentials return false. |
+| include_credentials | bool | No | true | HTTP-only. ROOT receives all available plaintext keys; ADMIN receives its own plaintext key and masked prefixes for other users. Set false to return `user_id`, `role`, and `api_key_available` without credentials or key prefixes. `api_key_available` is true only when the server can read the complete key for a server-side binding; hash-only credentials return false. |
 | limit | int | No | null | Page size (≥1). Omit to return all matches |
 | page | int | No | 1 | 1-based page number; only applies when `limit` is set |
 
 **Notes:**
 - Results are returned in creation order
 - ADMIN can only list users in their own account
-- Only ROOT receives stored plaintext in `api_key`. ADMIN receives `key_prefix` instead, including for its own row and other ADMIN users. Three-segment keys retain the first two segments and at most four characters of the secret segment, followed by `****`; secrets of four characters or fewer are completely hidden. Legacy keys expose at most their first four characters. Hash-only credentials retain their existing prefix.
+- ROOT receives every stored key as plaintext in `api_key`. A non-ROOT caller receives plaintext in `api_key` only for its own row; every other user (including other ADMIN users) is returned as a masked `key_prefix`. Self-matching is strict: the listing account, the row's user ID, and the account/user segments embedded in the three-segment key must all equal the caller's authenticated identity; otherwise the row is masked. Three-segment keys retain the first two segments and only the last four characters of the secret segment; every preceding secret character is replaced by `*`. Secrets of four characters or fewer are completely hidden. Keys that are not in the three-segment format are fully masked. Hash-only credentials retain their existing prefix.
 - Masking is enforced by the server for HTTP and MCP `list_users(include_credentials=true)`, so it also applies to CLI/SDK JSON output. Clients must treat `key_prefix` as display-only and require a supplied key to switch identities.
+- `ov admin list-users` additionally masks the plaintext `api_key` rows client-side by default, in both table and JSON output, and prints a notice on stderr. Pass `--reveal-api-keys` to emit plaintext: ROOT then shows every key, while an ADMIN/USER caller still sees only its own key (other rows are masked by the server). The flag affects CLI rendering only and does not change the server response. In table output the server's `api_key` (plaintext or client-masked) and `key_prefix` fields are merged into a single `api_key` column; JSON output keeps the server field names.
 - This restriction applies to stored-key listing. Registration and key regeneration still return the newly issued key to ROOT or ADMIN; ordinary USER self-service key rotation is not yet available.
 - In `trusted` mode, both `api_key` and `key_prefix` are omitted from the response
 - Users whose deletion has started are no longer returned
@@ -1691,6 +1692,8 @@ fmt.Println(users)
 ov admin list-users acme
 # If using root_api_key (--sudo):
 ov --sudo admin list-users acme
+# Show plaintext keys instead of masked values (ROOT: all keys; ADMIN/USER: own key only)
+ov --sudo admin list-users acme --reveal-api-keys
 # Filter by wildcard name
 ov admin list-users acme --name '*ali*'
 # Paginated
