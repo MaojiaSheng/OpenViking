@@ -261,16 +261,16 @@ pub async fn regenerate_key(
     output_format: OutputFormat,
     compact: bool,
 ) -> Result<()> {
+    let request_key = client.request_api_key();
     let update = if let Some(config) = active_config.filter(|config| {
         config.api_key.as_deref() == client.api_key()
-            && config
-                .api_key
+            && request_key
                 .as_deref()
                 .is_some_and(|key| key_belongs_to(key, account_id, user_id))
     }) {
-        let update = ConfigStore::new()?.prepare_api_key_update(config)?;
+        let update = ConfigStore::new()?.prepare_api_key_update(config, request_key.as_deref().unwrap())?;
         eprintln!(
-            "Rotating your API key will update api_key in {}.",
+            "Rotating your API key will update api_key in {} and any matching authentication headers.",
             update.path().display()
         );
         Some(update)
@@ -299,13 +299,13 @@ pub async fn regenerate_key(
         // retain the returned credential in the output even if saving failed.
         output_success(&response, output_format, compact);
         saved?;
-        if client.api_key() == Some(new_key) {
+        if request_key.as_deref() == Some(new_key) {
             eprintln!(
-                "Updated api_key in {path}. The generated key is unchanged; use a new seed or omit --seed to rotate it."
+                "Updated api_key in {path} and any matching authentication headers. The generated key is unchanged; use a new seed or omit --seed to rotate it."
             );
         } else {
             eprintln!(
-                "Updated api_key in {path}. The old key is invalid; update other clients using it."
+                "Updated api_key in {path} and any matching authentication headers. The old key is invalid; update other clients using it."
             );
         }
     } else {

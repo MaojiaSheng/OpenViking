@@ -3020,6 +3020,42 @@ async def test_user_other_auth_cannot_disclose_or_rotate_personal_key(
     assert (await manager.resolve_identity(key)).user_id == "alice"
 
 
+async def test_in_flight_user_rotation_cannot_overwrite_admin_reset(
+    lightweight_admin_client, lightweight_admin_app, monkeypatch
+):
+    manager = lightweight_admin_app.state.api_key_manager
+    account = _uid()
+    await manager.create_account(account, "owner")
+    old_key = await manager.register_user(account, "alice")
+    authenticated = asyncio.Event()
+    resume = asyncio.Event()
+    regenerate = manager.regenerate_key
+
+    async def pause_user_rotation(*args, **kwargs):
+        if kwargs.get("expected_api_key") == old_key:
+            authenticated.set()
+            await resume.wait()
+        return await regenerate(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "regenerate_key", pause_user_rotation)
+    path = f"/api/v1/admin/accounts/{account}/users/alice/key"
+    pending = asyncio.create_task(
+        lightweight_admin_client.post(path, headers={"X-API-Key": old_key})
+    )
+    try:
+        await asyncio.wait_for(authenticated.wait(), timeout=5)
+        reset = await lightweight_admin_client.post(path, headers={"X-API-Key": ROOT_KEY})
+        assert reset.status_code == 200
+        reset_key = reset.json()["result"]["user_key"]
+    finally:
+        resume.set()
+        response = await asyncio.wait_for(pending, timeout=5)
+    assert response.status_code == 401
+    url = f"/api/v1/admin/accounts/{account}/users"
+    assert (await lightweight_admin_client.get(url, headers={"X-API-Key": reset_key})).status_code == 200
+    assert (await lightweight_admin_client.get(url, headers={"X-API-Key": old_key})).status_code == 401
+
+
 @pytest.mark.parametrize(
     "key,expected",
     [

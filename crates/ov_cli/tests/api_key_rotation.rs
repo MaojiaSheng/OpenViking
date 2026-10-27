@@ -244,3 +244,154 @@ fn rotating_another_user_or_using_sudo_does_not_replace_personal_config() {
         assert!(!String::from_utf8_lossy(&result.stderr).contains("update api_key"));
     }
 }
+
+#[test]
+fn rotation_updates_the_effective_credential_and_matching_custom_headers() {
+    for (field, api_key, headers) in [
+        (
+            "extra_headers",
+            json!(OLD_KEY),
+            json!({"x-aPi-kEy": OLD_KEY, "Authorization": format!("Bearer {OLD_KEY}")}),
+        ),
+        (
+            "extra_header",
+            json!(OLD_KEY),
+            json!({"X-API-Key": OLD_KEY}),
+        ),
+        (
+            "extra_headers",
+            json!("unused-key"),
+            json!({"X-API-Key": OLD_KEY}),
+        ),
+        (
+            "extra_headers",
+            Value::Null,
+            json!({"authorization": format!("Bearer {OLD_KEY}")}),
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, server) = serve(
+            200,
+            json!({"status":"ok", "result":{"user_key":NEW_KEY}}),
+            || {},
+        );
+        let mut config = seed(dir.path(), &url);
+        config["api_key"] = api_key;
+        config[field] = headers;
+        config[field]["X-Custom"] = json!("preserved");
+        let path = dir.path().join("selected.json");
+        fs::write(&path, config.to_string()).unwrap();
+        let result = run(
+            dir.path(),
+            &["admin", "regenerate-key", "acme", "alice", "-o", "json"],
+        );
+        server.join().unwrap();
+        assert!(result.status.success(), "{result:?}");
+        let mut saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["api_key"], NEW_KEY);
+        assert_eq!(saved[field]["X-Custom"], "preserved");
+        assert!(!saved.to_string().contains(OLD_KEY));
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("matching authentication headers")
+        );
+
+        // A fresh CLI invocation must authenticate with the rotated key.
+        let (url, server) = serve(200, json!({"status":"ok", "result":[]}), || {});
+        saved["url"] = json!(url);
+        fs::write(&path, saved.to_string()).unwrap();
+        let result = run(dir.path(), &["admin", "list-users", "acme", "-o", "json"]);
+        let request = server.join().unwrap();
+        assert!(result.status.success(), "{result:?}");
+        assert!(request.contains(NEW_KEY));
+        assert!(!request.contains(OLD_KEY));
+    }
+}
+
+#[test]
+fn conflicting_header_credentials_fail_before_rotation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = seed(dir.path(), "http://127.0.0.1:1");
+    config["extra_headers"] = json!({"X-API-Key": OLD_KEY, "x-api-key": NEW_KEY});
+    let path = dir.path().join("selected.json");
+    fs::write(&path, config.to_string()).unwrap();
+    let result = run(
+        dir.path(),
+        &["admin", "regenerate-key", "acme", "alice", "-o", "json"],
+    );
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Conflicting X-API-Key headers"));
+    assert_eq!(fs::read_to_string(path).unwrap(), config.to_string());
+}
+
+#[cfg(unix)]
+#[test]
+fn rotation_preserves_config_symlinks_and_updates_the_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let (url, server) = serve(
+        200,
+        json!({"status":"ok", "result":{"user_key":NEW_KEY}}),
+        || {},
+    );
+    let mut expected = seed(dir.path(), &url);
+    let selected = dir.path().join("selected.json");
+    fs::create_dir(dir.path().join("shared")).unwrap();
+    let target = dir.path().join("shared/ovcli.conf");
+    fs::rename(&selected, &target).unwrap();
+    std::os::unix::fs::symlink("shared/ovcli.conf", &selected).unwrap();
+    let result = run(
+        dir.path(),
+        &["admin", "regenerate-key", "acme", "alice", "-o", "json"],
+    );
+    server.join().unwrap();
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(
+        fs::read_link(&selected).unwrap(),
+        Path::new("shared/ovcli.conf")
+    );
+    expected["api_key"] = json!(NEW_KEY);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(target).unwrap()).unwrap(),
+        expected
+    );
+    assert_eq!(
+        fs::read(selected).unwrap(),
+        serde_json::to_vec_pretty(&expected).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn retargeting_config_symlink_during_rotation_preserves_both_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let selected = dir.path().join("selected.json");
+    let changed_link = selected.clone();
+    let (url, server) = serve(
+        200,
+        json!({"status":"ok", "result":{"user_key":NEW_KEY}}),
+        move || {
+            fs::remove_file(&changed_link).unwrap();
+            std::os::unix::fs::symlink("other.json", changed_link).unwrap();
+        },
+    );
+    let config = seed(dir.path(), &url);
+    let target = dir.path().join("target.json");
+    let other = dir.path().join("other.json");
+    fs::rename(&selected, &target).unwrap();
+    fs::copy(&target, &other).unwrap();
+    std::os::unix::fs::symlink("target.json", &selected).unwrap();
+    let result = run(
+        dir.path(),
+        &["admin", "regenerate-key", "acme", "alice", "-o", "json"],
+    );
+    server.join().unwrap();
+    assert!(!result.status.success());
+    assert_eq!(fs::read_link(&selected).unwrap(), Path::new("other.json"));
+    for file in [target, other] {
+        assert_eq!(fs::read_to_string(file).unwrap(), config.to_string());
+    }
+    assert_eq!(
+        serde_json::from_slice::<Value>(&result.stdout).unwrap()["result"]["user_key"],
+        NEW_KEY
+    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Config changed during key rotation"));
+}

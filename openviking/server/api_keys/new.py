@@ -180,12 +180,14 @@ class APIKeyManager:
         await self._store.create_user_with_api_key(account_id, user_id, role, key)
         return key
 
-    async def regenerate_key(self, account_id, user_id, seed=None):
+    async def regenerate_key(self, account_id, user_id, seed=None, *, expected_api_key=None):
         if not self._issue_user_keys:
             raise FailedPreconditionError("Personal API keys are disabled in trusted mode")
         await self._require_manageable_user(account_id, user_id)
         key = generate_api_key(account_id, user_id, seed)
-        await self._store.replace_active_user_api_key(account_id, user_id, key)
+        await self._store.replace_active_user_api_key(
+            account_id, user_id, key, expected_api_key=expected_api_key
+        )
         return key
 
     async def get_registered_user_role(self, account_id: str, user_id: str) -> Role | None:

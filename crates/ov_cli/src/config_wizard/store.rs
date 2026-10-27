@@ -96,6 +96,8 @@ pub struct ConfigStore {
 
 pub(crate) struct PreparedApiKeyUpdate {
     path: PathBuf,
+    target: PathBuf,
+    old_key: String,
     original: Vec<u8>,
     value: Value,
     temp_file: tempfile::NamedTempFile,
@@ -107,17 +109,35 @@ impl PreparedApiKeyUpdate {
     }
 
     pub(crate) fn commit(mut self, new_key: &str) -> Result<()> {
-        if fs::read(&self.path)? != self.original {
+        if fs::canonicalize(&self.path)? != self.target
+            || fs::read(&self.target)? != self.original
+        {
             return Err(Error::Config(
                 "Config changed during key rotation; refusing to overwrite it".into(),
             ));
         }
         self.value["api_key"] = Value::String(new_key.to_string());
+        for field in ["extra_headers", "extra_header"] {
+            if let Some(headers) = self.value.get_mut(field).and_then(Value::as_object_mut) {
+                for (name, value) in headers {
+                    if name.eq_ignore_ascii_case("x-api-key")
+                        && value.as_str() == Some(self.old_key.as_str())
+                    {
+                        *value = Value::String(new_key.to_string());
+                    } else if name.eq_ignore_ascii_case("authorization")
+                        && value.as_str().and_then(|v| v.strip_prefix("Bearer "))
+                            == Some(self.old_key.as_str())
+                    {
+                        *value = Value::String(format!("Bearer {new_key}"));
+                    }
+                }
+            }
+        }
         self.temp_file
             .write_all(serde_json::to_string_pretty(&self.value)?.as_bytes())?;
         self.temp_file.flush()?;
         self.temp_file.as_file().sync_all()?;
-        self.temp_file.persist(&self.path).map_err(|error| {
+        self.temp_file.persist(&self.target).map_err(|error| {
             Error::Config(format!("Failed to replace config file: {}", error.error))
         })?;
         Ok(())
@@ -295,20 +315,36 @@ impl ConfigStore {
         write_config_file(&self.active_path, config)
     }
 
-    pub(crate) fn prepare_api_key_update(&self, expected: &Config) -> Result<PreparedApiKeyUpdate> {
-        let original = fs::read(&self.active_path)?;
+    pub(crate) fn prepare_api_key_update(&self, expected: &Config, old_key: &str) -> Result<PreparedApiKeyUpdate> {
+        let target = fs::canonicalize(&self.active_path)?;
+        let original = fs::read(&target)?;
         let current: Config = serde_json::from_slice(&original)?;
-        if current.url != expected.url || current.api_key != expected.api_key {
+        if current.url != expected.url || current.api_key != expected.api_key
+            || current.extra_headers != expected.extra_headers
+        {
             return Err(Error::Config(
                 "Active connection changed; retry key rotation with the current config".into(),
             ));
         }
+        // Case variants can coexist in the JSON map but become the same HTTP
+        // header. Refuse ambiguous credentials before invalidating any key.
+        if current.extra_headers.as_ref().is_some_and(|headers| {
+            headers.iter().any(|(name, value)| {
+                name.eq_ignore_ascii_case("x-api-key") && value != old_key
+            })
+        }) {
+            return Err(Error::Config(
+                "Conflicting X-API-Key headers; remove the overrides before rotating your key".into(),
+            ));
+        }
         Ok(PreparedApiKeyUpdate {
             path: self.active_path.clone(),
+            old_key: old_key.to_string(),
             value: serde_json::from_slice(&original)?,
             original,
             // Check that a replacement can be created before invalidating the old key.
-            temp_file: create_config_temp_file(&self.active_path)?,
+            temp_file: create_config_temp_file(&target)?,
+            target,
         })
     }
 

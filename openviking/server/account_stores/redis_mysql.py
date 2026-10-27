@@ -926,11 +926,14 @@ class RedisMySQLAccountStore(AccountStore):
         )
 
     async def replace_active_user_api_key(
-        self, account_id: str, user_id: str, api_key: str
+        self, account_id: str, user_id: str, api_key: str,
+        *, expected_api_key: str | None = None,
     ) -> None:
         await self._mutate_account(
             account_id,
-            lambda: self._mysql.replace_active_user_api_key(account_id, user_id, api_key),
+            lambda: self._mysql.replace_active_user_api_key(
+                account_id, user_id, api_key, expected_api_key=expected_api_key
+            ),
             lambda: (
                 (self._user_credential_fence_key(account_id, user_id),)
                 + self._binding_cache_keys(account_id, api_key, user_id)

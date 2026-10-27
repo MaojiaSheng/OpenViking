@@ -1215,6 +1215,7 @@ async def regenerate_key(
         account_id,
         user_id,
         seed=body.seed if body is not None else None,
+        expected_api_key=ctx.api_key if ctx.role == Role.USER else None,
     )
     return Response(status="ok", result={"user_key": new_key})
 
