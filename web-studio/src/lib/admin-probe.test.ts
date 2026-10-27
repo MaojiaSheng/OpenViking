@@ -52,8 +52,13 @@ describe('management role probes', () => {
           apiKey: '',
           adminApiKey: 'control-key',
         })
-        expect(result.admin).toMatchObject({ state, detailCode })
+        // detailCode only exists on the 'ok' results per CapabilityProbeResult;
+        // an explicit undefined key would make toMatchObject require it.
+        expect(result.admin).toMatchObject(
+          detailCode === undefined ? { state } : { state, detailCode },
+        )
         if (state === 'error') {
+          expect(result.admin).not.toHaveProperty('detailCode')
           expect(result.admin).toMatchObject(
             name === 'invalid credential'
               ? { statusCode: 401, errorCode: 'UNAUTHENTICATED' }

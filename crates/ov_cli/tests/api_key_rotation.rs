@@ -277,6 +277,12 @@ fn rotation_updates_the_effective_credential_and_matching_custom_headers() {
         );
         let mut config = seed(dir.path(), &url);
         config["api_key"] = api_key;
+        if config["api_key"].is_null() {
+            // The Bearer-only row has no personal api_key: without dropping the
+            // root fallback, admin commands would send X-API-Key: root-secret
+            // and the Bearer header would never be the effective credential.
+            config.as_object_mut().unwrap().remove("root_api_key");
+        }
         config[field] = headers;
         config[field]["X-Custom"] = json!("preserved");
         let path = dir.path().join("selected.json");
