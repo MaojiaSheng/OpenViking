@@ -248,6 +248,7 @@ class APIKeyManager:
     async def list_users_page(self, account_id, **filters):
         expose_key = filters.pop("expose_key", True)
         mask_keys = filters.pop("mask_keys", False)
+        hide_other_keys = filters.pop("hide_other_keys", False)
         # The masked view still shows the caller's own stored key in plaintext,
         # but only when account and user match the key's embedded identity.
         viewer_account_id = filters.pop("viewer_account_id", None)
@@ -272,8 +273,14 @@ class APIKeyManager:
             for user in page["users"]:
                 user.pop("api_key", None)
                 user.pop("key_prefix", None)
-        elif mask_keys:
+        elif mask_keys or hide_other_keys:
             for user in page["users"]:
+                if hide_other_keys and (
+                    account_id != viewer_account_id or user.get("user_id") != viewer_user_id
+                ):
+                    user.pop("api_key", None)
+                    user.pop("key_prefix", None)
+                    continue
                 if api_key := user.pop("api_key", None):
                     if self._is_viewer_own_key(
                         api_key,
@@ -283,8 +290,10 @@ class APIKeyManager:
                         viewer_user_id,
                     ):
                         user["api_key"] = api_key
-                    else:
+                    elif not hide_other_keys:
                         user["key_prefix"] = mask_api_key(api_key)
+                    else:
+                        user.pop("key_prefix", None)
         return page
 
     @staticmethod
