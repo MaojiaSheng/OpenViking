@@ -25,7 +25,7 @@ Admin API 用于多租户环境下的账户、用户和用户组管理。包括�
 | 管理用户组和成员 | Y | Y（本 account） | N |
 | 列出 agents（已废弃，返回空列表） | Y | Y（本 account） | N |
 | 重新生成 User Key（仅 API Key 模式） | Y | Y（本 account） | Y（自身密钥） |
-| 将用户提升为 ADMIN | Y | Y（本 account） | N |
+| 在 USER 与 ADMIN 之间变更用户角色 | Y | Y（本 account） | N |
 
 ## CLI `--sudo` 选项
 
@@ -1676,7 +1676,7 @@ ov --sudo admin remove-user acme bob
 
 #### 1. API 实现介绍
 
-将账户用户提升为 ADMIN。ROOT 可以操作任意账户；ADMIN 只能操作自己的账户。
+在 USER 与 ADMIN 之间变更账户用户角色，支持提升和降级。该接口仅用于身份管理变更操作。ROOT 可以操作任意账户；ADMIN 只能操作自己的账户。
 
 **处理流程：**
 1. 验证请求者具有 ROOT 或 ADMIN 权限，并限制 ADMIN 只能操作自己的账户
@@ -1696,11 +1696,12 @@ ov --sudo admin remove-user acme bob
 |------|------|------|--------|------|
 | account_id | str | 是 | - | 工作区 ID |
 | user_id | str | 是 | - | 用户 ID |
-| role | str | 是 | - | 固定为 "admin" |
+| role | str | 是 | - | 新角色："admin" 或 "user"，不区分大小写 |
 
 **说明：**
-- ROOT 和 ADMIN 可以将用户提升为 ADMIN；ADMIN 只能操作自己的账户
-- 该接口不支持设置 "user" 或 "root"；ROOT 身份只来自 `server.root_api_key`
+- ROOT 和 ADMIN 可以将用户提升为 ADMIN 或降级为 USER；ADMIN 只能操作自己的账户
+- 该接口仅接受 "user" 和 "admin"；ROOT 身份只来自 `server.root_api_key`
+- 角色输入不区分大小写：`user`/`User`/`USER` 等价，`admin`/`Admin`/`ADMIN` 等价；存储值和响应值统一为小写。
 
 #### 3. 使用示例
 
@@ -1750,6 +1751,9 @@ fmt.Println(result["role"])
 ```bash
 # ROOT 调用示例；acme 的 ADMIN 可用 ov admin set-role，无需 --sudo
 ov --sudo admin set-role acme bob admin
+
+# 将 bob 降级为 USER
+ov --sudo admin set-role acme bob user
 ```
 
 **响应示例**

@@ -1179,17 +1179,23 @@ async def set_user_role(
     user_id: str = Path(..., description="User ID"),
     ctx: RequestContext = Depends(get_request_context),
 ):
-    """Promote an account user to ADMIN."""
+    """Change an account user's role for identity management operations only.
+
+    ROOT may manage any account; ADMIN may manage only its own account.
+    Supports USER <-> ADMIN changes, including promotion and demotion.
+    Role input is case-insensitive; stored and returned roles are lowercase.
+    """
     _check_account_access(ctx, account_id)
-    if body.role != Role.ADMIN:
-        raise InvalidArgumentError("set_user_role only supports promotion to admin.")
-    await _get_api_key_manager(request).set_role(account_id, user_id, Role.ADMIN)
+    role = body.role.lower()
+    if role not in (Role.USER, Role.ADMIN):
+        raise InvalidArgumentError("set_user_role only supports user and admin roles.")
+    await _get_api_key_manager(request).set_role(account_id, user_id, role)
     return Response(
         status="ok",
         result={
             "account_id": account_id,
             "user_id": user_id,
-            "role": Role.ADMIN,
+            "role": role,
         },
     )
 

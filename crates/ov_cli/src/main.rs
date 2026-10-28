@@ -2242,7 +2242,7 @@ enum AdminCommands {
         #[arg(value_name = "user-id")]
         user_id: String,
     },
-    /// Change a user's role (ROOT only)
+    /// Change a user's role for identity management (ROOT or own-account ADMIN)
     SetRole {
         /// Account ID
         #[arg(value_name = "account-id")]
@@ -2250,7 +2250,7 @@ enum AdminCommands {
         /// User ID
         #[arg(value_name = "user-id")]
         user_id: String,
-        /// New role: admin or user
+        /// New role: admin or user (case-insensitive)
         #[arg(value_name = "role")]
         role: String,
     },

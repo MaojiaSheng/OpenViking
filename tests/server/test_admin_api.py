@@ -3254,10 +3254,27 @@ async def test_remove_user(
 # ---- Role management ----
 
 
-async def test_admin_can_set_user_role_in_own_account(
+@pytest.mark.parametrize("actor_role", [Role.ROOT, Role.ADMIN])
+@pytest.mark.parametrize(
+    ("initial_role", "requested_role", "new_role"),
+    [
+        (Role.USER, "admin", Role.ADMIN),
+        (Role.USER, "Admin", Role.ADMIN),
+        (Role.USER, "ADMIN", Role.ADMIN),
+        (Role.ADMIN, "user", Role.USER),
+        (Role.ADMIN, "User", Role.USER),
+        (Role.ADMIN, "USER", Role.USER),
+    ],
+)
+async def test_root_or_admin_can_set_user_role(
     lightweight_admin_client: httpx.AsyncClient,
+    lightweight_admin_app,
+    actor_role: str,
+    initial_role: str,
+    requested_role: str,
+    new_role: str,
 ):
-    """ADMIN can promote a user in its own account to ADMIN."""
+    """ROOT and ADMIN can promote and demote account users without rotating keys."""
     acct = _uid()
     create_account = await lightweight_admin_client.post(
         "/api/v1/admin/accounts",
@@ -3267,31 +3284,108 @@ async def test_admin_can_set_user_role_in_own_account(
     alice_key = create_account.json()["result"]["user_key"]
     create_user = await lightweight_admin_client.post(
         f"/api/v1/admin/accounts/{acct}/users",
-        json={"user_id": "bob", "role": "user"},
+        json={"user_id": "bob", "role": initial_role},
         headers=root_headers(),
     )
     bob_key = create_user.json()["result"]["user_key"]
 
     resp = await lightweight_admin_client.put(
         f"/api/v1/admin/accounts/{acct}/users/bob/role",
-        json={"role": "admin"},
+        json={"role": requested_role},
+        headers=root_headers() if actor_role == Role.ROOT else {"X-API-Key": alice_key},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["result"] == {
+        "account_id": acct,
+        "user_id": "bob",
+        "role": new_role,
+    }
+    manager = lightweight_admin_app.state.api_key_manager
+    assert (await manager.get_user(acct, "bob"))["role"] == new_role
+    assert (await manager.resolve_identity(bob_key)).role == new_role
+
+    register_user = await lightweight_admin_client.post(
+        f"/api/v1/admin/accounts/{acct}/users",
+        json={"user_id": "charlie", "role": "user"},
+        headers={"X-API-Key": bob_key},
+    )
+    assert register_user.status_code == (200 if new_role == Role.ADMIN else 403)
+
+
+@pytest.mark.parametrize("actor_role", [Role.ROOT, Role.ADMIN])
+@pytest.mark.parametrize("new_role", [Role.ROOT, "ROOT", "global", "Global", "invalid"])
+async def test_set_user_role_rejects_unsupported_roles(
+    lightweight_admin_client: httpx.AsyncClient,
+    lightweight_admin_app,
+    actor_role: str,
+    new_role: str,
+):
+    manager = lightweight_admin_app.state.api_key_manager
+    acct = _uid()
+    alice_key = await manager.create_account(acct, "alice")
+    bob_key = await manager.register_user(acct, "bob", Role.ADMIN)
+
+    resp = await lightweight_admin_client.put(
+        f"/api/v1/admin/accounts/{acct}/users/bob/role",
+        json={"role": new_role},
+        headers=root_headers() if actor_role == Role.ROOT else {"X-API-Key": alice_key},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_ARGUMENT"
+    assert (await manager.resolve_identity(bob_key)).role == Role.ADMIN
+
+
+@pytest.mark.parametrize("actor_role", [Role.USER, Role.ADMIN])
+@pytest.mark.parametrize("new_role", [Role.USER, Role.ADMIN])
+async def test_set_user_role_rejects_unauthorized_callers(
+    lightweight_admin_client: httpx.AsyncClient,
+    lightweight_admin_app,
+    actor_role: str,
+    new_role: str,
+):
+    """USER cannot change roles; ADMIN cannot change another account's roles."""
+    manager = lightweight_admin_app.state.api_key_manager
+    acct = _uid()
+    await manager.create_account(acct, "alice")
+    initial_role = Role.ADMIN if new_role == Role.USER else Role.USER
+    bob_key = await manager.register_user(acct, "bob", initial_role)
+    if actor_role == Role.ADMIN:
+        actor_key = await manager.create_account(_uid(), "other-admin")
+    else:
+        actor_key = await manager.register_user(acct, "charlie", Role.USER)
+
+    resp = await lightweight_admin_client.put(
+        f"/api/v1/admin/accounts/{acct}/users/bob/role",
+        json={"role": new_role},
+        headers={"X-API-Key": actor_key},
+    )
+    assert resp.status_code == 403
+    assert (await manager.resolve_identity(bob_key)).role == initial_role
+
+
+async def test_admin_can_demote_self_and_loses_role_management_access(
+    lightweight_admin_client: httpx.AsyncClient,
+    lightweight_admin_app,
+):
+    manager = lightweight_admin_app.state.api_key_manager
+    acct = _uid()
+    alice_key = await manager.create_account(acct, "alice")
+    await manager.register_user(acct, "bob", Role.ADMIN)
+
+    resp = await lightweight_admin_client.put(
+        f"/api/v1/admin/accounts/{acct}/users/alice/role",
+        json={"role": "user"},
         headers={"X-API-Key": alice_key},
     )
     assert resp.status_code == 200
-    assert resp.json()["result"]["role"] == "admin"
+    assert (await manager.resolve_identity(alice_key)).role == Role.USER
 
-    list_users = await lightweight_admin_client.get(
-        f"/api/v1/admin/accounts/{acct}/users",
-        headers={"X-API-Key": bob_key},
-    )
-    assert list_users.status_code == 200
-
-    invalid_role = await lightweight_admin_client.put(
-        f"/api/v1/admin/accounts/{acct}/users/bob/role",
-        json={"role": "root"},
+    restore_role = await lightweight_admin_client.put(
+        f"/api/v1/admin/accounts/{acct}/users/alice/role",
+        json={"role": "admin"},
         headers={"X-API-Key": alice_key},
     )
-    assert invalid_role.status_code == 400
+    assert restore_role.status_code == 403
 
 
 async def test_regenerate_key(admin_client: httpx.AsyncClient):

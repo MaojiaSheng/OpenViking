@@ -25,7 +25,7 @@ For `/api/v1/admin/*`, `trusted` mode permits requests with no explicit identity
 | Manage groups and membership | Y | Y (own account) | N |
 | List agents (deprecated, returns empty list) | Y | Y (own account) | N |
 | Regenerate user key (API Key mode only) | Y | Y (own account) | Y (own key) |
-| Promote user to ADMIN | Y | Y (own account) | N |
+| Change user role between USER and ADMIN | Y | Y (own account) | N |
 
 ## CLI `--sudo` Option
 
@@ -1821,7 +1821,7 @@ ov --sudo admin remove-user acme bob
 
 #### 1. API Implementation Overview
 
-Promote an account user to ADMIN. ROOT may operate on any account; ADMIN is limited to its own account.
+Change an account user's role between USER and ADMIN, including promotion and demotion. This endpoint is only for identity management operations. ROOT may operate on any account; ADMIN is limited to its own account.
 
 **Processing Flow:**
 1. Verify the requester has ROOT or ADMIN privileges and keep ADMIN within its own account
@@ -1841,11 +1841,12 @@ Promote an account user to ADMIN. ROOT may operate on any account; ADMIN is limi
 |-----------|------|----------|---------|-------------|
 | account_id | str | Yes | - | Workspace ID |
 | user_id | str | Yes | - | User ID |
-| role | str | Yes | - | Must be "admin" |
+| role | str | Yes | - | New role: "admin" or "user" (case-insensitive) |
 
 **Notes:**
-- ROOT and ADMIN can promote users to ADMIN; ADMIN is limited to its own account
-- This endpoint cannot set "user" or "root"; ROOT comes only from `server.root_api_key`
+- ROOT and ADMIN can promote users to ADMIN or demote them to USER; ADMIN is limited to its own account
+- This endpoint only accepts "user" and "admin"; ROOT comes only from `server.root_api_key`
+- Role input is case-insensitive: `user`/`User`/`USER` and `admin`/`Admin`/`ADMIN` are equivalent. Stored roles and response values are always lowercase.
 
 #### 3. Usage Examples
 
@@ -1895,6 +1896,9 @@ fmt.Println(result["role"])
 ```bash
 # ROOT example; an acme ADMIN can use `ov admin set-role` without --sudo
 ov --sudo admin set-role acme bob admin
+
+# Demote bob to USER
+ov --sudo admin set-role acme bob user
 ```
 
 **Response Example**

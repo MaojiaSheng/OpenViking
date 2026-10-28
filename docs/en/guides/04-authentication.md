@@ -647,7 +647,7 @@ curl http://localhost:1933/health
 | POST | `/api/v1/admin/accounts/{id}/users` | ROOT, ADMIN | Register user |
 | GET | `/api/v1/admin/accounts/{id}/users` | ROOT, ADMIN, USER | List users; ADMIN/USER are limited to their own account |
 | DELETE | `/api/v1/admin/accounts/{id}/users/{uid}` | ROOT, ADMIN | Remove user |
-| PUT | `/api/v1/admin/accounts/{id}/users/{uid}/role` | ROOT, ADMIN | Promote a user to ADMIN; ADMIN is limited to its own account |
+| PUT | `/api/v1/admin/accounts/{id}/users/{uid}/role` | ROOT, ADMIN | Change USER/ADMIN roles for identity management; ADMIN is limited to its own account |
 | POST | `/api/v1/admin/accounts/{id}/users/{uid}/key` | ROOT, ADMIN, USER | Regenerate user key; USER may rotate only its own key using personal API key authentication |
 
 ## Custom Authentication Plugins
