@@ -69,10 +69,10 @@ async def test_resolve_root_key(manager: APIKeyManager):
     assert identity.user_id is None
 
 
-@pytest.mark.parametrize("key", ["wrong-key", ""])
+@pytest.mark.parametrize("key", ["wrong-key", "", "YWNtZQ.dXNlcg.A"])
 async def test_resolve_invalid_key_raises(manager: APIKeyManager, key):
-    """Invalid key should raise UnauthenticatedError."""
-    with pytest.raises(UnauthenticatedError):
+    """Malformed keys should fail authentication with a format error."""
+    with pytest.raises(UnauthenticatedError, match="^Invalid API key format$"):
         await manager.resolve_identity(key)
 
 
@@ -767,10 +767,10 @@ async def test_user_and_group_persistence_across_reload(manager_service):
     assert await mgr3.get_group_members(acct, group_id) == []
 
 
-# ---- New format API Key tests ----
+# ---- API Key format tests ----
 
 
-async def test_seeded_new_format_keys_are_predictable(manager: APIKeyManager):
+async def test_seeded_api_keys_are_predictable(manager: APIKeyManager):
     from openviking.server.api_keys import parse_api_key
 
     seed = "client-known-seed"
@@ -815,27 +815,76 @@ async def test_seed_must_not_be_empty(manager: APIKeyManager):
         await manager.create_account(acct, "alice", seed="")
 
 
-async def test_is_new_format_key_validation():
-    """Test is_new_format_key correctly identifies key format."""
-    from openviking.server.api_keys import generate_api_key, is_new_format_key
+async def test_is_valid_format_key_validation():
+    """Test is_valid_format_key correctly identifies key format."""
+    from openviking.server.api_keys import generate_api_key, is_valid_format_key, parse_api_key
 
-    # Valid new format
+    # Valid API key format
     valid_key = generate_api_key("account", "user")
-    assert is_new_format_key(valid_key)
+    assert is_valid_format_key(valid_key)
 
     # Bare single-segment keys are not accepted
-    assert not is_new_format_key("a" * 64)
+    assert not is_valid_format_key("a" * 64)
 
     # Empty string
-    assert not is_new_format_key("")
+    assert not is_valid_format_key("")
 
     # Wrong number of segments
-    assert not is_new_format_key("onepart")
-    assert not is_new_format_key("two.parts")
-    assert not is_new_format_key("too.many.parts.here")
+    assert not is_valid_format_key("onepart")
+    assert not is_valid_format_key("two.parts")
+    assert not is_valid_format_key("too.many.parts.here")
+    with pytest.raises(ValueError, match="^Invalid API key format$"):
+        parse_api_key("two.parts")
 
 
 # ---- Registered user role ----
+
+
+@pytest.mark.parametrize("delete_account", [False, True])
+async def test_registered_identity_remains_readable_but_unusable_during_deletion(
+    manager: APIKeyManager, delete_account: bool
+):
+    acct = _uid()
+    await manager.create_account(acct, "alice")
+    key = await manager.register_user(acct, "bob", Role.USER)
+    assert (await manager.resolve_oauth_identity(acct, "bob", Role.USER)).role == Role.USER
+
+    await manager.begin_deletion(
+        acct,
+        None if delete_account else "bob",
+        task_id="delete-identity",
+        owner_account_id=acct,
+        owner_user_id="alice",
+    )
+
+    assert await manager.get_registered_user_role(acct, "bob") == Role.USER
+    with pytest.raises(
+        UnauthenticatedError, match="Account identity does not exist or is being deleted"
+    ):
+        await manager.resolve_oauth_identity(acct, "bob", Role.USER)
+    with pytest.raises(UnauthenticatedError, match="Invalid API key"):
+        await manager.resolve_identity(key)
+    target = "Account" if delete_account else "User"
+    with pytest.raises(FailedPreconditionError, match=f"{target} deletion is in progress") as exc:
+        await manager.regenerate_key(acct, "bob")
+    assert exc.value.details == {"task_id": "delete-identity"}
+
+
+@pytest.mark.parametrize("missing_account", [False, True])
+async def test_missing_identity_fails_authentication_and_management_separately(
+    manager: APIKeyManager, missing_account: bool
+):
+    acct = _uid()
+    if not missing_account:
+        await manager.create_account(acct, "alice")
+
+    assert await manager.get_registered_user_role(acct, "nobody") is None
+    with pytest.raises(
+        UnauthenticatedError, match="Account identity does not exist or is being deleted"
+    ):
+        await manager.resolve_oauth_identity(acct, "nobody", Role.USER)
+    with pytest.raises(NotFoundError):
+        await manager.regenerate_key(acct, "nobody")
 
 
 async def test_get_registered_user_role_returns_none_when_user_missing(manager: APIKeyManager):

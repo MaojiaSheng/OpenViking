@@ -467,7 +467,7 @@ fn mask_plaintext_api_keys(value: &mut Value) -> bool {
     }
 }
 
-/// Match `openviking/server/api_keys/new.py:mask_api_key` so CLI and API output look the same.
+/// Match `openviking/server/api_keys/key_mgr.py:mask_api_key` so CLI and API output look the same.
 fn mask_api_key(api_key: &str) -> String {
     let parts: Vec<&str> = api_key.split('.').collect();
     if api_key.is_empty() || parts.len() != 3 {

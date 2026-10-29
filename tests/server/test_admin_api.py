@@ -3087,7 +3087,7 @@ async def test_user_key_mask_handles_malformed_and_short_keys(key, expected):
 
 async def test_user_key_mask_reveals_only_the_viewers_own_key():
     from openviking.server.api_keys import APIKeyManager
-    from openviking.server.api_keys.new import generate_api_key, mask_api_key
+    from openviking.server.api_keys.key_mgr import generate_api_key, mask_api_key
 
     alice_key = generate_api_key("acme", "alice")
     bob_key = generate_api_key("acme", "bob")

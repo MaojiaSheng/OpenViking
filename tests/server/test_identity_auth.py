@@ -99,7 +99,9 @@ async def test_key_store_error_and_unknown_identity_fail_closed():
     manager = APIKeyManager("root", store)
     request = await make_request(manager)
     key = generate_api_key("acme", "missing")
-    with pytest.raises(UnauthenticatedError, match="Unknown"):
+    with pytest.raises(
+        UnauthenticatedError, match="Account identity does not exist or is being deleted"
+    ):
         await request.app.state.auth_plugin.resolve_identity(request, api_key=key)
     store.get_user.side_effect = OSError("database offline")
     with pytest.raises(OSError, match="database offline"):

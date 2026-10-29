@@ -6,11 +6,12 @@ import base64
 import hashlib
 import hmac
 import secrets
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TypeGuard
 
 from typing_extensions import deprecated
 
 from openviking.server.account_stores.base import AccountStore
+from openviking.server.account_stores.models import DeletionRecord, UserSummary
 from openviking.server.identity import ResolvedIdentity, Role
 from openviking_cli.exceptions import (
     FailedPreconditionError,
@@ -32,13 +33,13 @@ def _decode_segment(encoded: str) -> str:
     return base64.urlsafe_b64decode(encoded.encode("utf-8")).decode("utf-8")
 
 
-def is_new_format_key(api_key: str) -> bool:
+def is_valid_format_key(api_key: str) -> bool:
     return bool(api_key) and len(api_key.split(".")) == 3
 
 
 def parse_api_key(api_key: str) -> Tuple[str, str, str]:
-    if not is_new_format_key(api_key):
-        raise ValueError("Not a new format API key")
+    if not is_valid_format_key(api_key):
+        raise ValueError("Invalid API key format")
     account_id, user_id, secret = api_key.split(".")
     return (
         _decode_segment(account_id),
@@ -62,7 +63,7 @@ def generate_api_key(account_id: str, user_id: str, seed: Optional[str] = None) 
 
 def mask_api_key(api_key: str) -> str:
     """Mask every secret character except the last four; fully hide malformed keys."""
-    if not is_new_format_key(api_key):
+    if not is_valid_format_key(api_key):
         return "*" * len(api_key)
     account, user, secret = api_key.split(".")
     visible_length = 4 if len(secret) > 4 else 0
@@ -94,53 +95,56 @@ class APIKeyManager:
     async def close(self) -> None:
         await self._store.close()
 
-    async def _require_authenticatable_user(self, account_id: str, user_id: str):
+    async def _get_registered_identity(
+        self, account_id: str, user_id: str
+    ) -> ResolvedIdentity | None:
+        """Read and validate the registered identity, or return None if missing.
+
+        Freshness follows the store contract; deletion state is checked separately.
+        """
         user = await self.get_user(account_id, user_id)
         if user is None:
-            raise UnauthenticatedError("Unknown account or user")
-        deletion = await self.get_deletion(account_id, user_id)
-        if deletion is not None:
-            raise UnauthenticatedError("Invalid API key")
-        return user
+            return None
+        try:
+            registered_role = Role.parse(user["role"])
+            if registered_role == Role.ROOT:
+                raise ValueError("ROOT is not an account role")
+        except (KeyError, ValueError):
+            raise UnauthenticatedError("Registered account identity has an invalid role") from None
+        return ResolvedIdentity(role=registered_role, account_id=account_id, user_id=user_id)
 
-    async def _require_manageable_user(self, account_id: str, user_id: str):
-        account = await self.get_account(account_id)
-        if account is None:
-            raise NotFoundError(account_id, "account")
-        if account["status"] != "active":
-            raise FailedPreconditionError(
-                "Account deletion is in progress",
-                details={"task_id": account.get("task_id")},
-            )
-        user = await self.get_user_for_management(account_id, user_id)
-        if user is None:
-            raise NotFoundError(user_id, "user")
-        deletion = await self.get_deletion(account_id, user_id)
-        if deletion is not None:
-            raise FailedPreconditionError(
-                "User deletion is in progress",
-                details={"task_id": deletion.get("task_id")},
-            )
-        return user
+    @staticmethod
+    def _is_authenticatable_identity(
+        identity: ResolvedIdentity | None, deletion: DeletionRecord | None
+    ) -> TypeGuard[ResolvedIdentity]:
+        """Check whether the identity exists and has no account or user deletion record."""
+        return identity is not None and deletion is None
+
+    @staticmethod
+    def _is_manageable_user(user: UserSummary | None, deletion: DeletionRecord | None) -> bool:
+        """Check whether the user exists and has no deletion record.
+
+        The caller must first confirm that the account exists and is active.
+        """
+        return user is not None and deletion is None
 
     async def resolve_identity(self, api_key: str) -> ResolvedIdentity:
         if self._root_api_key and hmac.compare_digest(api_key, self._root_api_key):
             return ResolvedIdentity(role=Role.ROOT)
         account_id, user_id = await self._verify_key(api_key)
-        user = await self._require_authenticatable_user(account_id, user_id)
-        return ResolvedIdentity(
-            role=Role(user["role"]),
-            account_id=account_id,
-            user_id=user_id,
-        )
+        identity = await self._get_registered_identity(account_id, user_id)
+        deletion = await self.get_deletion(account_id, user_id) if identity is not None else None
+        if not self._is_authenticatable_identity(identity, deletion):
+            raise UnauthenticatedError("Account identity does not exist or is being deleted")
+        return identity
 
     async def _verify_key(self, key: str):
-        if not is_new_format_key(key):
-            raise UnauthenticatedError("Invalid API key")
+        if not is_valid_format_key(key):
+            raise UnauthenticatedError("Invalid API key format")
         try:
             account_id, user_id, _ = parse_api_key(key)
         except (ValueError, UnicodeError):
-            raise UnauthenticatedError("Invalid API key") from None
+            raise UnauthenticatedError("Invalid API key format") from None
         binding = await self._store.verify_api_key(
             key, account_id_hint=account_id, user_id_hint=user_id
         )
@@ -183,7 +187,23 @@ class APIKeyManager:
     async def regenerate_key(self, account_id, user_id, seed=None, *, expected_api_key=None):
         if not self._issue_user_keys:
             raise FailedPreconditionError("Personal API keys are disabled in trusted mode")
-        await self._require_manageable_user(account_id, user_id)
+        account = await self.get_account(account_id)
+        if account is None:
+            raise NotFoundError(account_id, "account")
+        if account["status"] != "active":
+            raise FailedPreconditionError(
+                "Account deletion is in progress",
+                details={"task_id": account.get("task_id")},
+            )
+        user = await self.get_user_for_management(account_id, user_id)
+        if user is None:
+            raise NotFoundError(user_id, "user")
+        deletion = await self.get_deletion(account_id, user_id)
+        if not self._is_manageable_user(user, deletion):
+            raise FailedPreconditionError(
+                "User deletion is in progress",
+                details={"task_id": deletion.get("task_id")},
+            )
         key = generate_api_key(account_id, user_id, seed)
         await self._store.replace_active_user_api_key(
             account_id, user_id, key, expected_api_key=expected_api_key
@@ -191,20 +211,31 @@ class APIKeyManager:
         return key
 
     async def get_registered_user_role(self, account_id: str, user_id: str) -> Role | None:
-        user = await self.get_user(account_id, user_id)
-        return Role(user["role"]) if user else None
+        identity = await self._get_registered_identity(account_id, user_id)
+        return identity.role if identity is not None else None
 
     async def resolve_oauth_identity(
         self, account_id: str, user_id: str, role: Role
     ) -> ResolvedIdentity:
-        user = await self._require_authenticatable_user(account_id, user_id)
-        if role.rank > Role(user["role"]).rank:
+        registered_identity = await self._get_registered_identity(account_id, user_id)
+        deletion = (
+            await self.get_deletion(account_id, user_id)
+            if registered_identity is not None
+            else None
+        )
+        if not self._is_authenticatable_identity(registered_identity, deletion):
+            raise UnauthenticatedError("Account identity does not exist or is being deleted")
+        try:
+            authorized_account_role = Role.parse(role)
+        except ValueError:
+            raise UnauthenticatedError("Invalid OAuth authorization role") from None
+        if not registered_identity.role.allows_token_role(authorized_account_role):
             raise UnauthenticatedError(
                 "OAuth token's embedded role exceeds the user's current role; "
                 "please re-authorize the client."
             )
         return ResolvedIdentity(
-            role=role,
+            role=authorized_account_role,
             account_id=account_id,
             user_id=user_id,
             from_oauth=True,
@@ -267,9 +298,7 @@ class APIKeyManager:
             )
             if name in filters
         }
-        page = await self._store.list_users_page(
-            account_id, **store_filters
-        )
+        page = await self._store.list_users_page(account_id, **store_filters)
         if not expose_key or not self._issue_user_keys:
             page["key_count"] = 0
             for user in page["users"]:

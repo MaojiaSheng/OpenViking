@@ -1063,7 +1063,7 @@ Create a new workspace with its first admin user.
 
 **Code Entry Points:**
 - `openviking/server/routers/admin.py:create_account` - HTTP route
-- `openviking/server/api_keys/new.py:APIKeyManager.create_account` - Core implementation
+- `openviking/server/api_keys/key_mgr.py:APIKeyManager.create_account` - Core implementation
 - `sdk/python/openviking_sdk/client.py:SyncHTTPClient.admin_create_account` - Python SDK
 
 #### 2. Interface and Parameters
@@ -1252,7 +1252,7 @@ List all workspaces (ROOT only).
 
 **Code Entry Points:**
 - `openviking/server/routers/admin.py:list_accounts` - HTTP route
-- `openviking/server/api_keys/new.py:APIKeyManager.get_accounts` - Core implementation
+- `openviking/server/api_keys/key_mgr.py:APIKeyManager.get_accounts` - Core implementation
 - `sdk/python/openviking_sdk/client.py:SyncHTTPClient.admin_list_accounts` - Python SDK
 
 #### 2. Interface and Parameters
@@ -1463,7 +1463,7 @@ Register a new user in a workspace.
 
 **Code Entry Points:**
 - `openviking/server/routers/admin.py:register_user` - HTTP route
-- `openviking/server/api_keys/new.py:APIKeyManager.register_user` - Core implementation
+- `openviking/server/api_keys/key_mgr.py:APIKeyManager.register_user` - Core implementation
 - `sdk/python/openviking_sdk/client.py:SyncHTTPClient.admin_register_user` - Python SDK
 
 #### 2. Interface and Parameters
@@ -1597,7 +1597,7 @@ List active users in a workspace. Users with deletion in progress are omitted.
 
 **Code Entry Points:**
 - `openviking/server/routers/admin.py:list_users` - HTTP route
-- `openviking/server/api_keys/new.py:APIKeyManager.get_users` - Core implementation
+- `openviking/server/api_keys/key_mgr.py:APIKeyManager.get_users` - Core implementation
 - `sdk/python/openviking_sdk/client.py:SyncHTTPClient.admin_list_users` - Python SDK
 
 #### 2. Interface and Parameters
@@ -1829,7 +1829,7 @@ Change an account user's role between USER and ADMIN, including promotion and de
 
 **Code Entry Points:**
 - `openviking/server/routers/admin.py:set_user_role` - HTTP route
-- `openviking/server/api_keys/new.py:APIKeyManager.set_role` - Core implementation
+- `openviking/server/api_keys/key_mgr.py:APIKeyManager.set_role` - Core implementation
 - `sdk/python/openviking_sdk/client.py:SyncHTTPClient.admin_set_role` - Python SDK
 
 #### 2. Interface and Parameters
@@ -1929,7 +1929,7 @@ Generate and store a user API key. With the default random generation, the old k
 
 **Code Entry Points:**
 - `openviking/server/routers/admin.py:regenerate_key` - HTTP route
-- `openviking/server/api_keys/new.py:APIKeyManager.regenerate_key` - Core implementation
+- `openviking/server/api_keys/key_mgr.py:APIKeyManager.regenerate_key` - Core implementation
 - `sdk/python/openviking_sdk/client.py:SyncHTTPClient.admin_regenerate_key` - Python SDK
 
 #### 2. Interface and Parameters

@@ -705,11 +705,11 @@ def create_app(
                 or "http://127.0.0.1:1933"
             )
 
-            async def _current_role(account_id: str, user_id: str) -> Role:
+            async def _registered_account_role(account_id: str, user_id: str) -> Role | None:
                 manager = getattr(app.state, "api_key_manager", None)
                 if manager is None:
-                    return Role.USER
-                return await manager.get_registered_user_role(account_id, user_id) or Role.USER
+                    return None
+                return await manager.get_registered_user_role(account_id, user_id)
 
             _route_provider = OpenVikingOAuthProvider(
                 store=_route_store,
@@ -717,7 +717,7 @@ def create_app(
                 access_token_ttl_seconds=ov_cfg.oauth.access_token_ttl_seconds,
                 refresh_token_ttl_seconds=ov_cfg.oauth.refresh_token_ttl_seconds,
                 auth_code_ttl_seconds=ov_cfg.oauth.auth_code_ttl_seconds,
-                role_resolver=_current_role,
+                role_resolver=_registered_account_role,
             )
             # Stash the route-time instances; the lifespan replaces these with
             # initialized copies before the first request lands.
