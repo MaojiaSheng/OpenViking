@@ -3,11 +3,14 @@
 """SemanticProcessor: Processes messages from SemanticQueue, generates .abstract.md and .overview.md."""
 
 import asyncio
+import json
 import re
 import threading
 import time
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+
+import yaml
 
 from openviking.core.namespace import classify_uri
 from openviking.models.model_error import ModelErrorKind, model_error_kind
@@ -481,6 +484,40 @@ class SemanticProcessor(DequeueHandlerBase):
         work_type = SkillSemanticMessageWork if msg.context_type == "skill" else SemanticMessageWork
         return work_type(self, msg, lock)
 
+    async def _enqueue_content_write_directory_refresh(
+        self, msg: SemanticMsg, file_abstracts: Dict[str, str]
+    ) -> None:
+        """Keep direct-parent aggregation outside the file write's task and lease."""
+        from openviking.storage.queuefs import get_queue_manager
+
+        queue_manager = get_queue_manager()
+        semantic_queue = queue_manager.get_queue(queue_manager.SEMANTIC, allow_create=True)
+        directory_msg = SemanticMsg(
+            uri=msg.uri,
+            context_type=msg.context_type,
+            recursive=False,
+            account_id=msg.account_id,
+            user_id=msg.user_id,
+            group_ids=msg.group_ids,
+            peer_id=msg.peer_id,
+            role=msg.role,
+            skip_vectorization=msg.skip_vectorization,
+            changes=msg.changes,
+            generation_trigger="content_write_parent_refresh",
+            coalesce_key=build_semantic_coalesce_key(
+                context_type=msg.context_type,
+                uri=msg.uri,
+                account_id=msg.account_id,
+                user_id=msg.user_id,
+                peer_id=msg.peer_id,
+            ),
+            file_abstracts=file_abstracts,
+            ingest_options=IngestOptions(acl_update=msg.ingest_options.acl_update),
+            propagate_to_parent=msg.propagate_to_parent,
+        )
+        with detach_task_context():
+            await semantic_queue.enqueue(directory_msg)
+
     async def on_dequeue(
         self,
         data: Optional[Dict[str, Any]],
@@ -745,6 +782,13 @@ class SemanticProcessor(DequeueHandlerBase):
                                     f"Using direct incremental semantic update for: {msg.uri}"
                                 )
 
+                            defer_directory_refresh = (
+                                msg.generation_trigger == "content_write"
+                                and msg.context_type == "resource"
+                                and not msg.recursive
+                                and msg.changes is not None
+                                and msg.aggregate_directory
+                            )
                             executor = SemanticTreeExecutor(
                                 processor=self,
                                 context_type=msg.context_type,
@@ -762,7 +806,9 @@ class SemanticProcessor(DequeueHandlerBase):
                                 coalesce_version=msg.coalesce_version,
                                 source=msg.source,
                                 generation_trigger=msg.generation_trigger,
-                                aggregate_directory=msg.aggregate_directory,
+                                aggregate_directory=(
+                                    msg.aggregate_directory and not defer_directory_refresh
+                                ),
                                 copy_source_uri=msg.copy_source_uri,
                                 file_md5s=msg.file_md5s,
                                 artifact_files=msg.artifact_files,
@@ -778,7 +824,17 @@ class SemanticProcessor(DequeueHandlerBase):
                                 run_uri,
                                 dag_stats,
                             )
-                            if not executor.stale and msg.aggregate_directory:
+                            if not executor.stale and defer_directory_refresh:
+                                # File summaries must be committed to L2 before independent
+                                # directory work reads them. The write still owns these
+                                # embeddings; directory work inherits neither task nor lease.
+                                await work._wait_for_embedding_work(
+                                    stop_waiting=self._embedding_worker_stopped,
+                                )
+                                await self._enqueue_content_write_directory_refresh(
+                                    msg, executor.file_abstracts
+                                )
+                            elif not executor.stale and msg.aggregate_directory:
                                 write_result = getattr(
                                     executor,
                                     "root_write_result",
@@ -1326,19 +1382,22 @@ class SemanticProcessor(DequeueHandlerBase):
             return {"name": file_name, "summary": summary}
 
         config = get_openviking_config()
+        live_context = self._parse_live_context_metadata(content)
 
         # Limit content length
         max_chars = config.semantic.max_file_content_chars
         if len(content) > max_chars:
             content = content[:max_chars] + "\n...(truncated)"
 
-        # Detect file type and select appropriate prompt
+        # Live context nodes need an operational summary rather than a generic
+        # Markdown document summary.
         file_type = self._detect_file_type(file_name)
-
-        if file_type == FILE_TYPE_CODE:
+        if live_context is not None:
+            prompt_id = "semantic.live_context_summary"
+        elif file_type == FILE_TYPE_CODE:
             from openviking.parse.parsers.code.ast import extract_skeleton_result
 
-            extraction = extract_skeleton_result(file_name, content)
+            extraction = await asyncio.to_thread(extract_skeleton_result, file_name, content)
             if extraction.text:
                 skeleton_text = extraction.text
                 max_skeleton_chars = config.semantic.max_skeleton_chars
@@ -1368,15 +1427,58 @@ class SemanticProcessor(DequeueHandlerBase):
         output_language = resolve_output_language(
             content, output_language_override=output_language_override
         )
-        prompt = render_prompt(
-            prompt_id,
-            {"file_name": file_name, "content": content, "output_language": output_language},
-        )
+        if live_context is not None:
+            prompt_variables = {
+                "file_name": file_name,
+                "title": live_context["title"],
+                "description": live_context["description"],
+                "tool_uri": live_context["tool_uri"],
+                "arguments": json.dumps(
+                    live_context["arguments"],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "output_language": output_language,
+            }
+        else:
+            prompt_variables = {
+                "file_name": file_name,
+                "content": content,
+                "output_language": output_language,
+            }
+        prompt = render_prompt(prompt_id, prompt_variables)
+
 
         async with llm_sem:
             with bind_telemetry_stage("semantic_execute"):
                 summary = await vlm.get_completion_async(prompt)
         return result(summary.strip())
+
+    @staticmethod
+    def _parse_live_context_metadata(content: str) -> Optional[Dict[str, Any]]:
+        lines = content.splitlines()
+        if not lines or lines[0] != "---":
+            return None
+        try:
+            closing_index = lines[1:].index("---") + 1
+            metadata = yaml.safe_load("\n".join(lines[1:closing_index]))
+        except (ValueError, yaml.YAMLError):
+            return None
+        if not isinstance(metadata, dict) or metadata.get("type") != "OpenViking Live Context":
+            return None
+        extension = metadata.get("x-openviking")
+        if not isinstance(extension, dict) or extension.get("type") != "mcp":
+            return None
+        tool_uri = extension.get("definition")
+        arguments = extension.get("args", {})
+        if not isinstance(tool_uri, str) or not isinstance(arguments, dict):
+            return None
+        return {
+            "title": str(metadata.get("title") or ""),
+            "description": str(metadata.get("description") or ""),
+            "tool_uri": tool_uri,
+            "arguments": arguments,
+        }
 
     async def _generate_single_file_summary(
         self,
